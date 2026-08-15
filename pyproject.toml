@@ -1,0 +1,54 @@
+[project]
+name = "georural"
+version = "0.1.0"
+description = "Geolocalização de propriedades rurais com uso de imagens de satélite e aprendizado de máquina"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    # Google Earth Engine
+    "earthengine-api>=0.1.370",
+
+    # Geoespacial
+    "rasterio>=1.3.9",
+    "geopandas>=0.14.0",
+    "shapely>=2.0.0",
+    "folium>=0.15.0",
+
+    # Machine Learning
+    "scikit-learn>=1.3.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+
+    # Processamento de imagens
+    "numpy>=1.24.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0.0",
+
+    # Visualização
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+
+    # Interface
+    "streamlit>=1.28.0",
+    "streamlit-folium>=0.20.0",
+
+    # Utilidades
+    "pandas>=2.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

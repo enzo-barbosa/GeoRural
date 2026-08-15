@@ -1,0 +1,42 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Streamlit
+.streamlit/
+
+# Notebooks
+notebooks/*.ipynb
+
+# Data
+data/
+dados/
+exports/
+outputs/
+models/
+*.tif
+*.tiff
+*.geojson
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
