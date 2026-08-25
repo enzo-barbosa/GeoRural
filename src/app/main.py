@@ -11,28 +11,34 @@ import streamlit as st
 
 from src.app.theme import get_css
 
-st.set_page_config(page_title="Geolocalização Rural", page_icon="🛰️", layout="wide")
 
-st.markdown(get_css(), unsafe_allow_html=True)
+def main():
+    st.set_page_config(page_title="Geolocalização Rural", page_icon="🛰️", layout="wide")
 
-if "gee_initialized" not in st.session_state:
-    from src.gee.auth import initialize_gee
+    st.markdown(get_css(), unsafe_allow_html=True)
 
-    initialize_gee()
-    st.session_state.gee_initialized = True
+    if "gee_initialized" not in st.session_state:
+        from src.gee.auth import initialize_gee
 
-st.sidebar.title("Navegação")
-page = st.sidebar.radio("Ir para:", ["🏠 Início", "🗺️ Classificar", "📊 Resultados"])
+        initialize_gee()
+        st.session_state.gee_initialized = True
 
-if page == "🏠 Início":
-    from src.app.pages.home import render_home
+    st.sidebar.title("Navegação")
+    page = st.sidebar.radio("Ir para:", ["🏠 Início", "🗺️ Classificar", "📊 Resultados"])
 
-    render_home()
-elif page == "🗺️ Classificar":
-    from src.app.pages.classify import render_classify
+    if page == "🏠 Início":
+        from src.app.pages.home import render_home
 
-    render_classify()
-elif page == "📊 Resultados":
-    from src.app.pages.results import render_results
+        render_home()
+    elif page == "🗺️ Classificar":
+        from src.app.pages.classify import render_classify
 
-    render_results()
+        render_classify()
+    elif page == "📊 Resultados":
+        from src.app.pages.results import render_results
+
+        render_results()
+
+
+if __name__ == "__main__":
+    main()

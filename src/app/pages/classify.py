@@ -3,6 +3,7 @@
 import os
 import tempfile
 
+import ee
 import folium
 import numpy as np
 import requests

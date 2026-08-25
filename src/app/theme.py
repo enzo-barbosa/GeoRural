@@ -17,6 +17,8 @@ CLASS_COLORS = {
     "Área Construída": "#e74c3c",
 }
 
+CLASS_NAMES = list(CLASS_COLORS.keys())
+
 
 def get_css() -> str:
     """Retorna CSS customizado para injetar na aplicação."""
