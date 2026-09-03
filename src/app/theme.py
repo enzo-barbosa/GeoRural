@@ -10,9 +10,9 @@ SUCCESS_COLOR = "#2e7d32"
 WARNING_COLOR = "#f9a825"
 
 CLASS_COLORS = {
-    "Agricultura": "#2ecc71",
-    "Pastagem": "#27ae60",
     "Vegetação Nativa": "#1a5276",
+    "Pastagem": "#27ae60",
+    "Agricultura": "#2ecc71",
     "Solo Exposto": "#f39c12",
     "Área Construída": "#e74c3c",
 }

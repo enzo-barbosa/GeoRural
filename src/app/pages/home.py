@@ -80,9 +80,9 @@ def render_home():
     st.subheader("Classes de Cobertura")
 
     legend_items = [
-        ("Agricultura", "Lavouras cultivadas"),
-        ("Pastagem", "Áreas de pasto"),
         ("Vegetação Nativa", "Mata, cerrado, floresta"),
+        ("Pastagem", "Áreas de pasto"),
+        ("Agricultura", "Lavouras cultivadas"),
         ("Solo Exposto", "Terra sem cobertura"),
         ("Área Construída", "Edificações, estradas"),
     ]

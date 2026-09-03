@@ -49,16 +49,16 @@ def classification_legend():
     <div class="legend-container">
         <strong>Legenda:</strong>
         <div class="legend-item">
-            <div class="legend-color" style="background-color: #2ecc71;"></div>
-            <div>Agricultura</div>
+            <div class="legend-color" style="background-color: #1a5276;"></div>
+            <div>Vegetação Nativa</div>
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background-color: #27ae60;"></div>
             <div>Pastagem</div>
         </div>
         <div class="legend-item">
-            <div class="legend-color" style="background-color: #1a5276;"></div>
-            <div>Vegetação Nativa</div>
+            <div class="legend-color" style="background-color: #2ecc71;"></div>
+            <div>Agricultura</div>
         </div>
         <div class="legend-item">
             <div class="legend-color" style="background-color: #f39c12;"></div>

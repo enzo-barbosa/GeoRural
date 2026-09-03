@@ -37,4 +37,4 @@ def test_precision_per_class():
     y_true = np.array([0, 0, 1, 1, 2, 2])
     y_pred = np.array([0, 1, 1, 1, 2, 0])
     precision = precision_per_class(y_true, y_pred)
-    assert precision["Agricultura"] == 0.5  # 1/2
+    assert precision["Vegetação Nativa"] == 0.5  # 1/2

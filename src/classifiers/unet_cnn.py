@@ -111,7 +111,7 @@ class UNet(nn.Module):
 
 
 def build_unet(
-    input_shape: tuple[int, int, int] = (128, 128, 10), num_classes: int = 5
+    input_shape: tuple[int, int, int] = (64, 64, 10), num_classes: int = 5
 ):
     """Constrói a arquitetura U-Net.
 
@@ -125,6 +125,53 @@ def build_unet(
     """
     model = UNet(n_channels=input_shape[2], n_classes=num_classes)
     return model
+
+
+def prepare_patches(
+    image: np.ndarray,
+    labels: np.ndarray,
+    patch_size: int = 64,
+    stride: int = 32,
+):
+    """Extrai patches (janelas) da imagem para treinamento da CNN.
+
+    A U-Net recebe patches de patch_size x patch_size como entrada.
+    O stride controla a sobreposição entre patches.
+
+    Args:
+        image: Array da imagem (height, width, channels)
+        labels: Array dos rótulos (height, width)
+        patch_size: Tamanho do patch
+        stride: Passo entre patches
+
+    Returns:
+        Tupla (patches_imagem, patches_rótulo)
+    """
+    patches_img = []
+    patches_label = []
+
+    h, w = image.shape[:2]
+
+    for y in range(0, h - patch_size + 1, stride):
+        for x in range(0, w - patch_size + 1, stride):
+            patch_img = image[y : y + patch_size, x : x + patch_size]
+            patch_label = labels[y : y + patch_size, x : x + patch_size]
+
+            patches_img.append(patch_img)
+            patches_label.append(patch_label)
+
+    if not patches_img:
+        raise ValueError(
+            f"Imagem ({h}x{w}) menor que patch_size ({patch_size}). "
+            "Aumente a imagem ou reduza o patch_size."
+        )
+
+    patches_img = np.array(patches_img)
+    patches_label = np.array(patches_label)
+
+    print(f"Gerados {len(patches_img)} patches de {patch_size}x{patch_size}")
+
+    return patches_img, patches_label
 
 
 def compile_model(model: nn.Module, learning_rate: float = 0.001, device: str | None = None):

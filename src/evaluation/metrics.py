@@ -10,9 +10,9 @@ from sklearn.metrics import (
 )
 
 CLASS_NAMES = [
-    "Agricultura",
-    "Pastagem",
     "Vegetação Nativa",
+    "Pastagem",
+    "Agricultura",
     "Solo Exposto",
     "Área Construída",
 ]

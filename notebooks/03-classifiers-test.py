@@ -9,9 +9,9 @@ sys.path.insert(0, PROJECT_ROOT)
 import numpy as np
 import pandas as pd
 from src.classifiers.random_forest import (
-    prepare_data_rf, train_random_forest, predict_random_forest
+    prepare_data_rf, train_random_forest, predict_random_forest, save_model as save_rf
 )
-from src.classifiers.svm import train_svm, predict_svm
+from src.classifiers.svm import train_svm, predict_svm, save_model as save_svm
 from src.evaluation.metrics import full_evaluation, print_evaluation
 from src.evaluation.confusion import plot_confusion_matrix
 
@@ -91,3 +91,9 @@ plot_feature_importance(
     feature_cols,
     save_path=os.path.join(PROJECT_ROOT, "outputs/rf_feature_importance.png")
 )
+
+
+# 9. Salvar modelos treinados
+os.makedirs(os.path.join(PROJECT_ROOT, "models"), exist_ok=True)
+save_rf(rf_model, os.path.join(PROJECT_ROOT, "models/random_forest.pkl"))
+save_svm(svm_model, os.path.join(PROJECT_ROOT, "models/svm.pkl"))
