@@ -40,7 +40,7 @@ def _load_classifier(classifier: str):
     if classifier == "svm":
         return load_svm(MODEL_PATHS["svm"])
     if classifier == "unet_cnn":
-        model = build_unet(input_shape=(64, 64, 10), num_classes=5)
+        model = build_unet(input_shape=(64, 64, 9), num_classes=5)
         return load_unet(model, MODEL_PATHS["unet_cnn"])
     raise ValueError(f"Classificador não suportado: {classifier}")
 
@@ -98,7 +98,7 @@ def _classify_area_real(composite, satellite, classifier):
         pred = predict_svm_model(model, flat)
         pred_map = pred.reshape(h, w)
     elif classifier == "unet_cnn":
-        model = build_unet(input_shape=(64, 64, 10), num_classes=5)
+        model = build_unet(input_shape=(64, 64, 9), num_classes=5)
         model = load_unet(model, MODEL_PATHS["unet_cnn"])
         pred_map = predict_unet(model, image, patch_size=64, stride=32)
     else:

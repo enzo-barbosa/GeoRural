@@ -31,7 +31,7 @@ RF_PARAMS = {"n_estimators": 200, "max_depth": 15, "random_state": 42}
 SVM_PARAMS = {"kernel": "rbf", "C": 100, "gamma": "scale"}
 
 UNET_PARAMS = {
-    "input_shape": (64, 64, 10),
+    "input_shape": (64, 64, 9),  # 9 canais = 6 bandas + NDVI + 2 texturas
     "num_classes": 5,
     "epochs": 100,
     "learning_rate": 0.001,
