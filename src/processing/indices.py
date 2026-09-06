@@ -44,9 +44,13 @@ def calculate_ndvi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image
         Imagem com banda NDVI adicionada
     """
     if satellite == "sentinel2":
-        ndvi = image.normalizedDifference(["B8", "B4"]).rename("NDVI")
+        ndvi = image.expression(
+            "(b('B8') - b('B4')) / (b('B8') + b('B4'))"
+        ).rename("NDVI")
     elif satellite == "landsat8":
-        ndvi = image.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+        ndvi = image.expression(
+            "(b('SR_B5') - b('SR_B4')) / (b('SR_B5') + b('SR_B4'))"
+        ).rename("NDVI")
     else:
         raise ValueError(f"Satélite não suportado: {satellite}")
 

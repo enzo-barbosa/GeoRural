@@ -9,6 +9,16 @@ def mask_clouds_sentinel2(image: ee.Image) -> ee.Image:
     Usa a banda SCL (Scene Classification Layer) para identificar
     nuvens, sombras de nuvens e pixels confiáveis.
 
+    Mantém apenas os pixels classificados como confiáveis para
+    mapeamento de cobertura do solo:
+    - 4 = vegetação
+    - 5 = solo não vegetado
+    - 6 = água
+    - 7 = não classificado / sem dados
+
+    Remove nuvens (8, 9, 10), sombras (3), pixels saturados (1),
+    características escuras (2) e sem dados (0).
+
     Args:
         image: Imagem Sentinel-2
 
@@ -17,14 +27,7 @@ def mask_clouds_sentinel2(image: ee.Image) -> ee.Image:
     """
     scl = image.select("SCL")
 
-    mask = (
-        scl.neq(4)
-        .And(scl.neq(5))
-        .And(scl.neq(6))
-        .And(scl.neq(8))
-        .And(scl.neq(9))
-        .And(scl.neq(10))
-    )
+    mask = scl.gte(4).And(scl.lte(7))
 
     return image.updateMask(mask)
 

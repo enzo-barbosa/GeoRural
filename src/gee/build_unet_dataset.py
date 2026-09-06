@@ -48,30 +48,46 @@ DEFAULT_BANDS = {
 
 
 def download_array(ee_image: ee.Image, region: ee.Geometry, scale: int) -> np.ndarray:
-    """Baixa uma imagem GEE (multi-banda) e retorna array (bandas, H, W)."""
-    url = ee_image.getDownloadURL(
-        {"region": region, "scale": scale, "format": "GEO_TIFF", "maxPixels": 1e9}
-    )
+    """Baixa uma imagem GEE (multi-banda) e retorna array (bandas, H, W).
 
-    response = requests.get(url, timeout=180)
-    response.raise_for_status()
+    O GEE limita o tamanho da resposta de getDownloadURL (~50 MB). Para
+    evitar estouro, as bandas são baixadas em grupos e concatenadas.
+    Como todos os grupos usam a mesma região/escala/projeção, as grades
+    ficam alinhadas.
+    """
+    bands = ee_image.bandNames().getInfo()
+    arrays = []
+    meta = None
 
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-        tmp.write(response.content)
-        tmp_path = tmp.name
+    for i in range(0, len(bands), 6):
+        group = bands[i : i + 6]
+        url = ee_image.select(group).getDownloadURL(
+            {"region": region, "scale": scale, "format": "GEO_TIFF", "maxPixels": 1e9}
+        )
 
-    try:
-        with rasterio.open(tmp_path) as src:
-            data = src.read()
-            meta = {
-                "transform": src.transform,
-                "crs": str(src.crs),
-                "shape": data.shape,
-                "bounds": list(src.bounds),
-            }
-    finally:
-        os.unlink(tmp_path)
+        response = requests.get(url, timeout=300)
+        response.raise_for_status()
 
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            tmp.write(response.content)
+            tmp_path = tmp.name
+
+        try:
+            with rasterio.open(tmp_path) as src:
+                chunk = src.read()
+                if meta is None:
+                    meta = {
+                        "transform": src.transform,
+                        "crs": str(src.crs),
+                        "shape": chunk.shape,
+                        "bounds": list(src.bounds),
+                    }
+        finally:
+            os.unlink(tmp_path)
+
+        arrays.append(chunk)
+
+    data = np.concatenate(arrays, axis=0)
     return data, meta
 
 

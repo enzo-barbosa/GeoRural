@@ -100,10 +100,8 @@ def extract_samples_gee(
     Returns:
         FeatureCollection com pontos e valores de bandas
     """
-    total_samples = samples_per_class * 5
-
     training_points = ground_truth.stratifiedSample(
-        numPoints=total_samples,
+        numPoints=samples_per_class,
         classBand="class_id",
         region=region,
         scale=scale,
