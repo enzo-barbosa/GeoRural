@@ -14,17 +14,19 @@ from src.classifiers.random_forest import (
 from src.classifiers.svm import train_svm, predict_svm, save_model as save_svm
 from src.evaluation.metrics import full_evaluation, print_evaluation
 from src.evaluation.confusion import plot_confusion_matrix
+from src.processing.features import get_feature_bands
 
 # 1. Carregar dados de treinamento
 df = pd.read_csv(os.path.join(PROJECT_ROOT, "data/samples/training_samples.csv"))
 
-# Separar atributos e rótulos
-feature_cols = [c for c in df.columns if c not in {"class_id", "y", "x"} and df[c].dtype != object]
+# Usar as MESMAS 9 features da U-Net (get_feature_bands) para comparabilidade
+feature_cols = [c for c in get_feature_bands("sentinel2") if c in df.columns]
 X = df[feature_cols].values
 y = df["class_id"].values
 
 print(f"Total de amostras: {len(X)}")
 print(f"Classes: {np.unique(y)}")
+print(f"Features ({len(feature_cols)}): {feature_cols}")
 
 # 2. Preparar dados (Hold-Out 70/30)
 X_train, X_test, y_train, y_test = prepare_data_rf(X, y)
