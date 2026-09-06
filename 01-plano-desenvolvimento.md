@@ -4061,5 +4061,70 @@ acessível e validada para o contexto deste projeto.
 
 ---
 
+# 📌 Estado de Continuidade — sessão de trabalho
+
+> Seção anexada para retomar o trabalho em sessões futuras.
+> **1 commit por fase; o usuário roda os comandos git.**
+
+## Stack real
+- **PyTorch** (torch 2.13) — TensorFlow NÃO instalado e NÃO usado (docs/README desatualizados dizem TF).
+- **Sentinel-2** como satélite de referência (10m, óptico, grátis via GEE).
+- **Ordem de classes unificada:** 0=Veg. Nativa, 1=Pastagem, 2=Agricultura, 3=Solo, 4=Construída.
+- **GEE project:** `georural-project` (`.env` local, ignorado).
+- **Conta GEE do projeto:** `georural92@gmail.com` (aprovada no signup). `earthengine authenticate` deve ser feito com ela (NÃO usar conta pessoal).
+
+## Git log
+- `6221dcb` first commit
+- `99f41e1` Change the gee email
+- `eca9087` **Commit A** — fix: unify land-cover class order and fix U-Net data prep
+- `7ebf91e` **Commit B** — feat: build full U-Net raster dataset and align input channels ✅
+
+## Fase A (feita)
+- Ordem de classes unificada (config, theme, metrics, confusion, components, classify, home, test_metrics).
+- `prepare_patches` em `src/classifiers/unet_cnn.py`; `build_unet` default 64×64.
+- Notebook 03 salva `models/random_forest.pkl` e `models/svm.pkl`.
+
+## Fase B (código feito; dados pendentes de GEE)
+- `build_unet_dataset.py` → gera `data/processed/unet_image.npy`, `unet_labels.npy`, `meta.json`.
+- Notebook 04 carrega rasters (não CSV esparso).
+- Canais U-Net = 9 (6 bandas + NDVI + 2 texturas).
+- `.env` com GEE_PROJECT_ID.
+
+## 🔧 Ambiente (reparo) — 05/09/2026
+- **Venv quebrado:** todos os scripts de `.venv/bin/` (earthengine, streamlit, pip, pytest, jupyter, etc.)
+  apontavam para `#!/home/enzo-barbosa/Documents/Projects/tcc-teste/.venv/bin/python3` (venv de projeto antigo,
+  inexistente) → "command not found". **Correção:** 59 shebangs reescritos para
+  `#!/home/enzo-barbosa/Documents/Projects/GeoRural/.venv/bin/python3`. Verificado com
+  `earthengine --help`, `streamlit --version`, `pip --version`, `pytest --version`.
+- `ruff check src/`: **6 avisos menores pré-existentes** (imports não usados, ordenação SIM115/RUF059/F841,
+  F401, PIE810) — para corrigir na Fase D.
+- Testes: `pytest tests/ -q` → **16 passed**.
+
+## ✅ GEE — ranço resolvido
+- Diagnóstico confirmado por token OAuth: a credencial antiga pertencia a `pasquatty@gmail.com` (conta pessoal),
+  que NÃO tinha permissão no projeto → `EEException` em `initialize_gee()`.
+- **Solução:** reautenticar com `earthengine authenticate` usando `georural92@gmail.com` (conta do projeto).
+- Se necessário no Cloud Console: atribuir `roles/serviceusage.serviceUsageConsumer` à `georural92@gmail.com`
+  no projeto `georural-project` e habilitar a Earth Engine API.
+
+## Próximos passos
+1. **GEE:** `earthengine authenticate` (georural92@gmail.com) → validar token + `initialize_gee()`.
+2. Extrair dados (GEE ok):
+   - `python src/gee/extract_samples_cli.py --satellite sentinel2` (balancear classe 3).
+   - `python src/gee/build_unet_dataset.py --satellite sentinel2`
+3. **Etapa C (consistência + treino):** ajustar `notebooks/03-classifiers-test.py` para usar as
+   **mesmas 9 features** da U-Net (`get_feature_bands`) em vez de todas as colunas do CSV,
+   depois treinar RF/SVM (`notebooks/03-classifiers-test.py`). Hold-Out 70/30.
+4. **Etapa D:** treino U-Net (`notebooks/04-unet-training.ipynb`, RTX 5070, `models/unet_model.pth`).
+5. **Fase D:** alinhar docs (TF→PyTorch) + checkboxes honestos + corrigir os 6 avisos de ruff.
+6. `streamlit run run_app.py`.
+
+## Lembretes
+- NÃO commitar `.env`, `data/`, `models/`, `outputs/`, `notebooks/*.ipynb` (gitignore).
+- CSV atual `training_samples.csv` = Landsat 8 desbalanceado (classe 3 = 155) → será substituído por Sentinel-2.
+- `01-plano-desenvolvimento.md` só é commitado junto de outras mudanças da mesma fase (evitar commits duplicados).
+
+---
+
 **Última atualização:** Julho 2026
 **Versão do documento:** 1.0
