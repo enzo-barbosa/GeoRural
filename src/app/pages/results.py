@@ -2,7 +2,6 @@
 
 import io
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -94,7 +93,6 @@ def render_results():
     st.subheader("Mapa de Classificação")
 
     pred_map = classification.get("pred_map")
-    meta = classification.get("meta")
     rgb_image = classification.get("rgb_image")
 
     if pred_map is None:

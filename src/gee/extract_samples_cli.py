@@ -60,7 +60,7 @@ def run(polygon, start_date, end_date, satellite, max_cloud_pct, scale, seed, ou
     if "class_id" not in df.columns:
         raise RuntimeError(f"Coluna 'class_id' ausente nas amostras. Colunas disponíveis: {df.columns.tolist()}")
 
-    drop_cols = [c for c in df.columns if c.startswith("QA") or c.startswith("ST_") or c.startswith("MSK_") or c.startswith("TCI_") or c.startswith("WVP") or c.startswith("AOT") or c in {"SR_QA_AEROSOL"}]
+    drop_cols = [c for c in df.columns if c.startswith(("QA", "ST_", "MSK_", "TCI_", "WVP", "AOT")) or c in {"SR_QA_AEROSOL"}]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors="ignore")
 
     class_dist = df["class_id"].value_counts().sort_index()

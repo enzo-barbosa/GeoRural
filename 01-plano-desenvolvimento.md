@@ -4096,8 +4096,7 @@ acessível e validada para o contexto deste projeto.
   inexistente) → "command not found". **Correção:** 59 shebangs reescritos para
   `#!/home/enzo-barbosa/Documents/Projects/GeoRural/.venv/bin/python3`. Verificado com
   `earthengine --help`, `streamlit --version`, `pip --version`, `pytest --version`.
-- `ruff check src/`: **6 avisos menores pré-existentes** (imports não usados, ordenação SIM115/RUF059/F841,
-  F401, PIE810) — para corrigir na Fase D.
+- `ruff check src/`: **6 avisos menores** (SIM115/RUF059/F841/F401/PIE810/I001) — **corrigidos em 06/09/2026**.
 - Testes: `pytest tests/ -q` → **16 passed**.
 
 ## ✅ GEE — ranço resolvido
@@ -4107,21 +4106,31 @@ acessível e validada para o contexto deste projeto.
 - Se necessário no Cloud Console: atribuir `roles/serviceusage.serviceUsageConsumer` à `georural92@gmail.com`
   no projeto `georural-project` e habilitar a Earth Engine API.
 
-## Próximos passos
-1. **GEE:** `earthengine authenticate` (georural92@gmail.com) → validar token + `initialize_gee()`.
-2. Extrair dados (GEE ok):
-   - `python src/gee/extract_samples_cli.py --satellite sentinel2` (balancear classe 3).
-   - `python src/gee/build_unet_dataset.py --satellite sentinel2`
-3. **Etapa C (consistência + treino):** ajustar `notebooks/03-classifiers-test.py` para usar as
-   **mesmas 9 features** da U-Net (`get_feature_bands`) em vez de todas as colunas do CSV,
-   depois treinar RF/SVM (`notebooks/03-classifiers-test.py`). Hold-Out 70/30.
-4. **Etapa D:** treino U-Net (`notebooks/04-unet-training.ipynb`, RTX 5070, `models/unet_model.pth`).
-5. **Fase D:** alinhar docs (TF→PyTorch) + checkboxes honestos + corrigir os 6 avisos de ruff.
-6. `streamlit run run_app.py`.
+## 📊 Dados — extraídos (06/09/2026)
+- **CSV Sentinel-2 balanceado:** `data/samples/training_samples.csv` (500 × 5 classes = 2500 amostras).
+- **Rasters U-Net:** `data/processed/unet_image.npy` (558×1115×9), `unet_labels.npy`, `meta.json`.
+- Bugs corrigidos no pipeline: máscara SCL invertida (descartava vegetação/não-vegetado/água), NDVI via
+  `normalizedDifference` nulificando 43% da imagem (agora usa `expression`), `stratifiedSample` com
+  `total_samples = samples_per_class×5` estourando o limite de 5000 elementos (agora `samples_per_class`),
+  e download dos rasters acima de 50MB (agora em grupos de bandas). Commit `8e52cbc`.
+
+## 🤖 Modelos — RF/SVM treinados (06/09/2026)
+- Features de RF/SVM alinhadas com as **9 features** da U-Net (`get_feature_bands`) — commit `5a36b33`.
+- `models/random_forest.pkl` (acurácia 0.832, Kappa 0.790) e `models/svm.pkl` (0.861, Kappa 0.827).
+- Aviso: classe 3 (Solo Exposto) = apenas 1.413 px no GT completo → sub-representada no treino da U-Net.
+
+## Etapas A/B/C — concluídas; D/E/F — em andamento
+- [x] **Etapa A:** venv reparado (59 shebangs + `activate` hardcoded) + commit `01f1d10`.
+- [x] **Etapa B:** GEE autenticado + dados extraídos + fixes de pipeline + commit `8e52cbc`.
+- [x] **Etapa C:** RF/SVM com as 9 features + commit `5a36b33`.
+- [ ] **Etapa D:** treino U-Net no PC do amigo (RTX 5070/Blackwell). Ver `notebooks/04-unet-training.py`
+      + `unet_dataset.zip` (GitHub Release). Devolver `models/unet_model.pth`.
+- [x] **Etapa E:** docs (README/CONTEXTO/plano) + 6 avisos ruff corrigidos.
+- [x] **Etapa F:** app validado (smoke test HTTP 200) + fix de features no `classify.py`.
 
 ## Lembretes
 - NÃO commitar `.env`, `data/`, `models/`, `outputs/`, `notebooks/*.ipynb` (gitignore).
-- CSV atual `training_samples.csv` = Landsat 8 desbalanceado (classe 3 = 155) → será substituído por Sentinel-2.
+- CSV atual `training_samples.csv` = **Sentinel-2 balanceado** (500 × 5). O job antigo era Landsat 8 desbalanceado.
 - `01-plano-desenvolvimento.md` só é commitado junto de outras mudanças da mesma fase (evitar commits duplicados).
 
 ---

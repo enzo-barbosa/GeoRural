@@ -15,9 +15,8 @@ from src.classifiers.random_forest import load_model as load_rf
 from src.classifiers.random_forest import predict_random_forest as predict_rf_model
 from src.classifiers.svm import load_model as load_svm
 from src.classifiers.svm import predict_svm as predict_svm_model
-from src.classifiers.unet_cnn import build_unet
+from src.classifiers.unet_cnn import build_unet, predict_unet
 from src.classifiers.unet_cnn import load_model as load_unet
-from src.classifiers.unet_cnn import predict_unet
 from src.gee.collector import (
     get_composite_image,
     polygon_to_ee_geometry,
@@ -25,7 +24,7 @@ from src.gee.collector import (
 )
 from src.gee.preprocessor import preprocess_image
 from src.geo.raster_io import read_geotiff
-from src.processing.features import extract_features_ee
+from src.processing.features import extract_features_ee, get_feature_bands
 
 MODEL_PATHS = {
     "random_forest": "models/random_forest.pkl",
@@ -53,14 +52,14 @@ def _download_ee_image(image: ee.Image, geometry, scale: int = 10, bandas: list 
         {"region": geometry, "scale": scale, "format": "GEO_TIFF", "maxPixels": 1e9}
     )
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
-    tmp.write(response.content)
-    tmp.close()
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        response = requests.get(url, timeout=120)
+        response.raise_for_status()
+        tmp.write(response.content)
+        tmp_path = tmp.name
 
-    data, meta = read_geotiff(tmp.name)
-    os.unlink(tmp.name)
+    data, meta = read_geotiff(tmp_path)
+    os.unlink(tmp_path)
     return data, meta
 
 
@@ -77,9 +76,11 @@ def _classify_area_real(composite, satellite, classifier):
     """Aplica o modelo treinado na imagem e retorna o mapa de classificação e imagem RGB real."""
     scale = 10 if satellite == "sentinel2" else 30
     rgb_img = _get_rgb_composite(composite, satellite)
-    rgb_data, meta = _download_ee_image(rgb_img, composite.geometry(), scale=scale)
+    rgb_data, _ = _download_ee_image(rgb_img, composite.geometry(), scale=scale)
 
-    data, meta_all = _download_ee_image(composite, composite.geometry(), scale=scale)
+    data, meta_all = _download_ee_image(
+        composite.select(get_feature_bands(satellite)), composite.geometry(), scale=scale
+    )
 
     if data is None or data.size == 0 or rgb_data is None or rgb_data.size == 0:
         return None, None, None
@@ -177,14 +178,14 @@ def render_classify():
         col_start, col_end = st.columns(2)
         with col_start:
             start_date = st.date_input(
-                "Data inicial", value=__import__("datetime").date(2024, 1, 1)
+                "Data inicial", value=__import__("datetime").date(2023, 1, 1)
             )
         with col_end:
             end_date = st.date_input(
-                "Data final", value=__import__("datetime").date(2024, 6, 30)
+                "Data final", value=__import__("datetime").date(2023, 12, 31)
             )
 
-        max_cloud = st.slider("Máximo de cobertura de nuvens (%)", 0, 100, 20)
+        max_cloud = st.slider("Máximo de cobertura de nuvens (%)", 0, 100, 80)
 
         st.markdown("---")
         st.markdown("**Legenda das classes:**")
@@ -236,7 +237,7 @@ def classify_area(polygon_data, satellite, classifier, start_date, end_date, max
 
         composite = get_composite_image(collection, geometry)
         composite = preprocess_image(composite, satellite)
-        extract_features_ee(composite, satellite)
+        composite = extract_features_ee(composite, satellite)
 
         model_path = MODEL_PATHS.get(classifier)
         model_loaded = False
