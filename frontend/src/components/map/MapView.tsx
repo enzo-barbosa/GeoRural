@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, LayersControl, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 import L from 'leaflet'
@@ -12,6 +12,9 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
+
+// World bounds to prevent infinite zoom out and white space
+const WORLD_BOUNDS = [[-90, -180], [90, 180]] as [number, number][]
 
 interface MapViewProps {
   onDraw: (coordinates: number[][][]) => void
@@ -86,12 +89,33 @@ export function MapView({
       <MapContainer
         center={[-14.235, -51.925]}
         zoom={5}
+        minZoom={2}
+        maxBounds={WORLD_BOUNDS}
+        maxBoundsViscosity={1.0}
+        worldCopyJump={false}
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <LayersControl position="topright">
+          <LayersControl.BaseLayer name="Satélite" checked>
+            <TileLayer
+              attribution='&copy; <a href="https://www.esri.com/">Esri</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.BaseLayer name="Ruas">
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+          </LayersControl.BaseLayer>
+          <LayersControl.Overlay name="Rótulos (Híbrido)" checked={false}>
+            <TileLayer
+              attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
+            />
+          </LayersControl.Overlay>
+        </LayersControl>
+
         <DrawControl
           onDraw={onDraw}
           onRemove={onRemove}
