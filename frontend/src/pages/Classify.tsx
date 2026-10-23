@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MapPin, AlertCircle, CheckCircle, Loader2, AlertTriangle, Satellite } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -36,19 +36,21 @@ export function Classify() {
   const [startDate, setStartDate] = useState('2023-01-01')
   const [endDate, setEndDate] = useState('2023-12-31')
   const [maxCloud, setMaxCloud] = useState(80)
+  const [includeTopography, setIncludeTopography] = useState(true)
+  const [includeCrop, setIncludeCrop] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const { data: modelsStatus } = useModelsStatus()
   const classifyMutation = useClassify()
 
-  const handlePolygonDraw = (coordinates: number[][][]) => {
+  const handlePolygonDraw = useCallback((coordinates: number[][][]) => {
     setPolygon(coordinates)
     setError(null)
-  }
+  }, [])
 
-  const handlePolygonRemove = () => {
+  const handlePolygonRemove = useCallback(() => {
     setPolygon(null)
-  }
+  }, [])
 
   const getModelStatus = (name: string) => {
     switch (name) {
@@ -79,6 +81,8 @@ export function Classify() {
       start_date: startDate,
       end_date: endDate,
       max_cloud: maxCloud,
+      include_topography: includeTopography,
+      include_crop: includeCrop,
     }
 
     try {
@@ -89,7 +93,7 @@ export function Classify() {
         return
       }
 
-      // Navigate to results page with job_id
+      localStorage.setItem(`result_${result.job_id}`, JSON.stringify(result))
       navigate(`/results?job_id=${result.job_id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao classificar')
@@ -243,6 +247,28 @@ export function Classify() {
                         className="mt-2 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary"
                       />
                     </div>
+
+                  <div className="border-t pt-4 space-y-3">
+                    <Label className="font-medium">Análises adicionais</Label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={includeTopography}
+                        onChange={(e) => setIncludeTopography(e.target.checked)}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Análise topográfica (elevação, declividade)
+                    </label>
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={includeCrop}
+                        onChange={(e) => setIncludeCrop(e.target.checked)}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Tipo de cultivo (série NDVI/EVI)
+                    </label>
+                  </div>
 
                   <div className="border-t pt-6">
                     <Label className="font-medium">Legenda das Classes</Label>

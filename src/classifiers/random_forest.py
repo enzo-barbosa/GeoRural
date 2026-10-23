@@ -5,40 +5,54 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
+from src.evaluation.spatial_split import spatial_holdout_indices
+
 
 def prepare_data_rf(
     features: np.ndarray,
     labels: np.ndarray,
     test_size: float = 0.3,
     random_state: int = 42,
+    groups: np.ndarray | None = None,
 ):
     """Prepara dados para treinamento do RF.
 
-    Aplica Hold-Out 70/30. Usa estratificação apenas se todas as classes
-    tiverem ao menos 2 amostras.
+    Sem ``groups`` aplica Hold-Out 70/30 aleatório (estratificado).
+
+    Com ``groups`` (ex.: blocos espaciais) aplica Hold-Out mantendo blocos
+    inteiros em treino ou teste, evitando autocorrelação espacial.
 
     Args:
         features: Array de atributos (n_samples, n_features)
         labels: Array de rótulos (n_samples,)
         test_size: Proporção do conjunto de teste
         random_state: Semente aleatória
+        groups: Identificador de bloco espacial por amostra (opcional)
 
     Returns:
         Tupla (X_train, X_test, y_train, y_test)
     """
-    _, counts = np.unique(labels, return_counts=True)
-    stratify = labels if counts.min() >= 2 else None
+    if groups is not None:
+        train_idx, test_idx = spatial_holdout_indices(
+            groups, test_size=test_size, random_state=random_state
+        )
+        X_train, X_test = features[train_idx], features[test_idx]
+        y_train, y_test = labels[train_idx], labels[test_idx]
+        print(f"Divisão espacial: {len(np.unique(groups))} blocos")
+    else:
+        _, counts = np.unique(labels, return_counts=True)
+        stratify = labels if counts.min() >= 2 else None
 
-    if stratify is None:
-        print("Aviso: estratificação desativada porClasses com poucas amostras.")
+        if stratify is None:
+            print("Aviso: estratificação desativada por classes com poucas amostras.")
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        features,
-        labels,
-        test_size=test_size,
-        random_state=random_state,
-        stratify=stratify,
-    )
+        X_train, X_test, y_train, y_test = train_test_split(
+            features,
+            labels,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=stratify,
+        )
 
     print(f"Treinamento: {len(X_train)} amostras")
     print(f"Teste: {len(X_test)} amostras")
@@ -52,6 +66,7 @@ def train_random_forest(
     n_trees: int = 200,
     max_depth: int = 15,
     random_state: int = 42,
+    verbose: int = 1,
 ):
     """Treina o modelo Random Forest.
 
@@ -74,7 +89,7 @@ def train_random_forest(
         max_depth=max_depth,
         random_state=random_state,
         n_jobs=-1,
-        verbose=1,
+        verbose=verbose,
     )
 
     model.fit(X_train, y_train)

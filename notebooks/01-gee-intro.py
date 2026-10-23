@@ -39,9 +39,9 @@ point = ee.Geometry.Point([-50.25, -20.28])
 # Criar buffer de 5km ao redor
 area = point.buffer(5000)
 
-print(f"Área de estudo: Fernandópolis, SP")
-print(f"Centro: -50.25, -20.28")
-print(f"Raio: 5km")
+print("Área de estudo: Fernandópolis, SP")
+print("Centro: -50.25, -20.28")
+print("Raio: 5km")
 
 # %% [markdown]
 # ## 3. Buscar Imagens Sentinel-2
@@ -108,7 +108,7 @@ url = image.getThumbURL({
     "dimensions": 512
 })
 
-print(f"URL da imagem RGB (copie e abra no navegador):")
+print("URL da imagem RGB (copie e abra no navegador):")
 print(url)
 
 # %% [markdown]
@@ -127,7 +127,7 @@ url_ndvi = ndvi.getThumbURL({
     "dimensions": 512
 })
 
-print(f"URL do NDVI (copie e abra no navegador):")
+print("URL do NDVI (copie e abra no navegador):")
 print(url_ndvi)
 
 # %% [markdown]

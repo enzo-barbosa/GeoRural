@@ -1,13 +1,11 @@
 """Testes para métricas de avaliação."""
 
 import numpy as np
-import pytest
+
 from src.evaluation.metrics import (
+    kappa_coefficient,
     overall_accuracy,
     precision_per_class,
-    recall_per_class,
-    f1_per_class,
-    kappa_coefficient
 )
 
 

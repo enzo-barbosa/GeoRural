@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Home } from '@/pages/Home'
 import { Classify } from '@/pages/Classify'
 import { Results } from '@/pages/Results'
@@ -28,7 +29,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <AppRoutes />
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   )

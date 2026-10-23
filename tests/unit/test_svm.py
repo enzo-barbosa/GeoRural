@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 from sklearn.datasets import make_classification
-from src.classifiers.svm import train_svm, predict_svm
+
+from src.classifiers.svm import predict_svm, train_svm
 
 
 @pytest.fixture

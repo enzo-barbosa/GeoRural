@@ -174,13 +174,77 @@ def prepare_patches(
     return patches_img, patches_label
 
 
-def compile_model(model: nn.Module, learning_rate: float = 0.001, device: str | None = None):
+def spatial_patch_split(
+    image: np.ndarray,
+    labels: np.ndarray,
+    patch_size: int = 64,
+    stride: int = 32,
+    tiles: int = 3,
+    val_tiles: int = 1,
+):
+    """Separa patches em treino/validação por faixas espaciais disjuntas.
+
+    As faixas (tiles) são bandas horizontais do raster. A validação usa as
+    últimas ``val_tiles`` faixas, garantindo que treino e validação não
+    compartilhem vizinhança espacial (evita vazamento por patches sobrepostos).
+
+    Args:
+        image: Imagem (height, width, channels).
+        labels: Rótulos (height, width).
+        patch_size: Tamanho do patch.
+        stride: Passo entre patches.
+        tiles: Número de faixas horizontais.
+        val_tiles: Número de faixas reservadas para validação.
+
+    Returns:
+        Tupla (X_train, y_train, X_val, y_val).
+    """
+    height, width = image.shape[:2]
+    ys = list(range(0, height - patch_size + 1, stride))
+    xs = list(range(0, width - patch_size + 1, stride))
+    if not ys or not xs:
+        raise ValueError(
+            f"Imagem ({height}x{width}) menor que patch_size ({patch_size})."
+        )
+
+    tiles = max(2, tiles)
+    val_tiles = max(1, min(val_tiles, tiles - 1))
+
+    train_img, train_lbl, val_img, val_lbl = [], [], [], []
+    for iy, y in enumerate(ys):
+        tile = min(int(iy / len(ys) * tiles), tiles - 1)
+        is_val = tile >= (tiles - val_tiles)
+        for x in xs:
+            patch_img = image[y : y + patch_size, x : x + patch_size]
+            patch_lbl = labels[y : y + patch_size, x : x + patch_size]
+            if is_val:
+                val_img.append(patch_img)
+                val_lbl.append(patch_lbl)
+            else:
+                train_img.append(patch_img)
+                train_lbl.append(patch_lbl)
+
+    return (
+        np.array(train_img),
+        np.array(train_lbl),
+        np.array(val_img),
+        np.array(val_lbl),
+    )
+
+
+def compile_model(
+    model: nn.Module,
+    learning_rate: float = 0.001,
+    device: str | None = None,
+    class_weights: np.ndarray | None = None,
+):
     """Compila o modelo com otimizador Adam e loss apropriada.
 
     Args:
         model: Modelo U-Net
         learning_rate: Taxa de aprendizado
         device: Dispositivo ('cuda' ou 'cpu')
+        class_weights: Pesos por classe (para classes desbalanceadas)
 
     Returns:
         Modelo compilado, optimizer, criterion
@@ -191,7 +255,11 @@ def compile_model(model: nn.Module, learning_rate: float = 0.001, device: str | 
     model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()
+    if class_weights is not None:
+        weights = torch.tensor(class_weights, dtype=torch.float32)
+        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
+    else:
+        criterion = nn.CrossEntropyLoss()
 
     print(f"Modelo compilado no dispositivo: {device}")
     print(model)
@@ -209,6 +277,7 @@ def train_unet(
     batch_size: int = 16,
     learning_rate: float = 0.001,
     save_path: str = "models/unet_model.pth",
+    class_weights: np.ndarray | None = None,
 ):
     """Treina o modelo U-Net.
 
@@ -227,7 +296,9 @@ def train_unet(
         Histórico de treinamento
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, optimizer, criterion = compile_model(model, learning_rate, device)
+    model, optimizer, criterion = compile_model(
+        model, learning_rate, device, class_weights=class_weights
+    )
 
     # Converter numpy arrays para tensors PyTorch
     X_train = torch.FloatTensor(X_train).permute(0, 3, 1, 2)
@@ -262,7 +333,7 @@ def train_unet(
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item() * batch_x.size(0)
+            train_loss += loss.item() * batch_y.numel()
             _, predicted = torch.max(outputs.data, 1)
             train_total += batch_y.numel()
             train_correct += (predicted == batch_y).sum().item()
@@ -281,7 +352,7 @@ def train_unet(
                 outputs = model(batch_x)
                 loss = criterion(outputs, batch_y)
 
-                val_loss += loss.item() * batch_x.size(0)
+                val_loss += loss.item() * batch_y.numel()
                 _, predicted = torch.max(outputs.data, 1)
                 val_total += batch_y.numel()
                 val_correct += (predicted == batch_y).sum().item()

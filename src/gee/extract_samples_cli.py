@@ -50,7 +50,20 @@ def run(polygon, start_date, end_date, satellite, max_cloud_pct, scale, seed, ou
     samples = training_points.getInfo()
     records = []
     for feature in samples.get("features", []):
-        records.append(feature["properties"])
+        props = dict(feature["properties"])
+
+        if "longitude" not in props or "latitude" not in props:
+            geometry = feature.get("geometry") or {}
+            coords = geometry.get("coordinates")
+            if (
+                isinstance(coords, (list, tuple))
+                and len(coords) >= 2
+                and isinstance(coords[0], (int, float))
+            ):
+                props["longitude"] = coords[0]
+                props["latitude"] = coords[1]
+
+        records.append(props)
 
     df = pd.DataFrame(records)
 

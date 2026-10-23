@@ -1,19 +1,16 @@
 """FastAPI dependencies for GEE and model management."""
 
-import json
-import os
 from functools import lru_cache
 from pathlib import Path
 
-import ee
-import joblib
-import torch
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 
 from backend.app.config import get_settings
+from src.classifiers.crop_classifier import load_model as load_crop
 from src.classifiers.random_forest import load_model as load_rf
 from src.classifiers.svm import load_model as load_svm
-from src.classifiers.unet_cnn import build_unet, load_model as load_unet
+from src.classifiers.unet_cnn import build_unet
+from src.classifiers.unet_cnn import load_model as load_unet
 from src.gee.auth import initialize_gee
 
 # Global flag for GEE initialization
@@ -38,6 +35,7 @@ def get_model_path(model_name: str) -> Path:
         "random_forest": "random_forest.pkl",
         "svm": "svm.pkl",
         "unet_cnn": "unet_model.pth",
+        "crop": "crop_classifier.pkl",
     }[model_name]
 
 
@@ -60,6 +58,8 @@ def get_cached_model(model_name: str):
     if model_name == "unet_cnn":
         model = build_unet(input_shape=(64, 64, 9), num_classes=5)
         return load_unet(model, str(path))
+    if model_name == "crop":
+        return load_crop(str(path))
 
     raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
 
@@ -70,4 +70,5 @@ def get_models_status() -> dict[str, bool]:
         "random_forest": check_model_exists("random_forest"),
         "svm": check_model_exists("svm"),
         "unet_cnn": check_model_exists("unet_cnn"),
+        "crop": check_model_exists("crop"),
     }

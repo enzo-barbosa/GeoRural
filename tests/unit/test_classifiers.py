@@ -3,8 +3,11 @@
 import numpy as np
 import pytest
 from sklearn.datasets import make_classification
+
 from src.classifiers.random_forest import (
-    prepare_data_rf, train_random_forest, predict_random_forest
+    predict_random_forest,
+    prepare_data_rf,
+    train_random_forest,
 )
 
 

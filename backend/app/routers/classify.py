@@ -1,19 +1,19 @@
 """Classification API router."""
 
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, Query
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from backend.app.dependencies.models import get_gee, get_models_status
 from backend.app.schemas.classify import (
+    ClassificationError,
+    ClassificationResult,
     ClassifyRequest,
     ClassifyResponse,
-    ClassificationError,
-    ClassificationPending,
-    ClassificationResult,
     ModelsStatusResponse,
 )
 from backend.app.services.classification_service import classify_area
-from backend.app.dependencies.models import get_gee, get_models_status
 
 router = APIRouter(prefix="/api/classify", tags=["classification"])
 
@@ -38,6 +38,8 @@ async def classify_endpoint(
         start_date=str(request.start_date),
         end_date=str(request.end_date),
         max_cloud=request.max_cloud,
+        include_topography=request.include_topography,
+        include_crop=request.include_crop,
     )
 
     if result["status"] == "failed":

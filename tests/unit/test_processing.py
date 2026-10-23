@@ -1,7 +1,7 @@
 """Testes para módulos de processamento."""
 
 import numpy as np
-import pytest
+
 from src.processing.indices import calculate_ndvi
 
 

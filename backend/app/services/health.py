@@ -9,7 +9,7 @@ async def check_health() -> dict:
     try:
         get_gee()
         gee_ok = True
-    except Exception:
+    except Exception:  # noqa: BLE001,S110
         pass
 
     return {

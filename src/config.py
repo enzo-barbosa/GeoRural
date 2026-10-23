@@ -26,6 +26,41 @@ CLASS_COLORS = {
     "Área Construída": "#e74c3c",
 }
 
+CROP_NAMES = [
+    "Cana-de-açúcar",
+    "Citros",
+    "Pastagem",
+    "Soja",
+    "Milho",
+]
+
+CROP_COLORS = {
+    "Cana-de-açúcar": "#8e44ad",
+    "Citros": "#f1c40f",
+    "Pastagem": "#27ae60",
+    "Soja": "#16a085",
+    "Milho": "#e67e22",
+}
+
+# Classes de declividade (EMBRAPA)
+SLOPE_CLASS_NAMES = [
+    "Plano",
+    "Suave ondulado",
+    "Ondulado",
+    "Forte ondulado",
+    "Montanhoso",
+    "Escarpado",
+]
+
+SLOPE_CLASS_COLORS = [
+    "#2ecc71",
+    "#a3d977",
+    "#f4d03f",
+    "#f39c12",
+    "#e67e22",
+    "#e74c3c",
+]
+
 RF_PARAMS = {"n_estimators": 200, "max_depth": 15, "random_state": 42}
 
 SVM_PARAMS = {"kernel": "rbf", "C": 100, "gamma": "scale"}

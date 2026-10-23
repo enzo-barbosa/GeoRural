@@ -2,9 +2,9 @@
 
 from fastapi import APIRouter, Depends
 
+from backend.app.dependencies.models import get_gee
 from backend.app.schemas.classify import HealthResponse
 from backend.app.services.health import check_health
-from backend.app.dependencies.models import get_gee
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 

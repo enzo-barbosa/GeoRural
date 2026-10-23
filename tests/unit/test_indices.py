@@ -1,8 +1,8 @@
 """Testes para índices espectrais."""
 
 import numpy as np
-import pytest
-from src.processing.indices import calculate_ndvi, calculate_evi
+
+from src.processing.indices import calculate_evi, calculate_ndvi
 
 
 def test_ndvi_positive():

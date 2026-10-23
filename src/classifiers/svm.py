@@ -14,6 +14,7 @@ def train_svm(
     C: float = 100,
     gamma: str = "scale",
     random_state: int = 42,
+    verbose: bool = True,
 ):
     """Treina o modelo SVM.
 
@@ -46,7 +47,7 @@ def train_svm(
                     C=C,
                     gamma=gamma,
                     random_state=random_state,
-                    verbose=True,
+                    verbose=verbose,
                 ),
             ),
         ]

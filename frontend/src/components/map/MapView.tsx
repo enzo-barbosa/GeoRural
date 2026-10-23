@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, LayersControl, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
@@ -24,27 +24,79 @@ interface MapViewProps {
 }
 
 function DrawControl({ onDraw, onRemove, initialPolygon, disabled }: MapViewProps) {
-  const onPolygonDraw = onDraw
-  const onPolygonRemove = onRemove
   const map = useMapEvents({})
 
+  // Keep the latest callbacks without re-running the effects on every render.
+  const onDrawRef = useRef(onDraw)
+  const onRemoveRef = useRef(onRemove)
+  const polygonRef = useRef<L.Polygon | null>(null)
+  const lastInitialRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    onDrawRef.current = onDraw
+  }, [onDraw])
+
+  useEffect(() => {
+    onRemoveRef.current = onRemove
+  }, [onRemove])
+
+  // Sync a polygon received from React state (e.g. when restoring the view).
+  // The layer created by Geoman on draw is already displayed, so we never
+  // recreate it here (that would duplicate the polygon).
   useEffect(() => {
     if (!map) return
+    const key = initialPolygon ? JSON.stringify(initialPolygon) : null
+    if (key === lastInitialRef.current) return
+    lastInitialRef.current = key
 
-    const leafletMap = map as any
-
-    if (initialPolygon && !disabled) {
-      const polygon = L.polygon(
-        initialPolygon[0].map(([lng, lat]) => [lat, lng]),
-        { color: '#2563eb', weight: 2, fillOpacity: 0.1 }
-      )
-      polygon.addTo(leafletMap)
-      leafletMap.pm.addLayer(polygon)
-      leafletMap.fitBounds(polygon.getBounds())
+    if (!initialPolygon) {
+      if (polygonRef.current) {
+        polygonRef.current.remove()
+        polygonRef.current = null
+      }
+      return
     }
 
+    if (polygonRef.current) return
+
+    const ring = initialPolygon[0]
+    if (!ring || ring.length < 3) return
+
+    const polygon = L.polygon(
+      ring.map(([lng, lat]) => [lat, lng]),
+      { color: '#2563eb', weight: 2, fillOpacity: 0.1 }
+    )
+    polygon.addTo(map)
+    polygonRef.current = polygon
+    map.fitBounds(polygon.getBounds())
+  }, [map, initialPolygon])
+
+  // Register Geoman events and toggle draw mode.
+  useEffect(() => {
+    if (!map) return
+    const leafletMap = map as any
+
+    const handleCreate = (e: any) => {
+      if (e.layer instanceof L.Polygon) {
+        polygonRef.current = e.layer
+        const coordinates = e.layer
+          .getLatLngs()
+          .map((ring: any) => ring.map((latlng: any) => [latlng.lng, latlng.lat]))
+        onDrawRef.current(coordinates)
+      }
+    }
+
+    const handleRemove = () => {
+      polygonRef.current = null
+      lastInitialRef.current = null
+      onRemoveRef.current()
+    }
+
+    leafletMap.on('pm:create', handleCreate)
+    leafletMap.on('pm:remove', handleRemove)
+
     if (disabled) {
-      leafletMap.pm.disableDraw('Polygon')
+      leafletMap.pm.disableDraw()
     } else {
       leafletMap.pm.enableDraw('Polygon', {
         cursorMarker: true,
@@ -52,28 +104,12 @@ function DrawControl({ onDraw, onRemove, initialPolygon, disabled }: MapViewProp
       })
     }
 
-    // Handle draw events
-    const handleCreate = (e: any) => {
-      if (e.layer instanceof L.Polygon) {
-        const coordinates = e.layer.getLatLngs().map((ring: any) =>
-          ring.map((latlng: any) => [latlng.lng, latlng.lat])
-        )
-        onDraw(coordinates)
-      }
-    }
-
-    const handleRemove = () => {
-      onRemove()
-    }
-
-    leafletMap.on('pm:create', handleCreate)
-    leafletMap.on('pm:remove', handleRemove)
-
     return () => {
       leafletMap.off('pm:create', handleCreate)
       leafletMap.off('pm:remove', handleRemove)
+      leafletMap.pm.disableDraw()
     }
-  }, [initialPolygon, disabled, onDraw, onRemove, map])
+  }, [map, disabled])
 
   return null
 }

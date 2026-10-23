@@ -113,7 +113,13 @@ def extract_samples_gee(
         collection=training_points, scale=scale, geometries=True
     )
 
-    return training_data
+    def _attach_coords(feature):
+        coords = feature.geometry().centroid(1).coordinates()
+        return feature.set(
+            {"longitude": coords.get(0), "latitude": coords.get(1)}
+        )
+
+    return training_data.map(_attach_coords)
 
 
 def export_ground_truth(

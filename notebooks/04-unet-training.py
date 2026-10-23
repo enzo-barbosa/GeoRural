@@ -21,15 +21,15 @@
 # dentro de `data/processed/`.
 
 # %%
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-from src.classifiers.unet_cnn import build_unet, train_unet, prepare_patches
+from src.classifiers.unet_cnn import build_unet, spatial_patch_split, train_unet
 from src.processing.features import get_feature_bands
 
 # %%
@@ -64,32 +64,27 @@ for cls_id, count in zip(unique, counts):
     print(f"  Classe {cls_id}: {count} pixels")
 
 # %% [markdown]
-# ## 2. Preparar patches
+# ## 2. Patches com split espacial
+#
+# Faixas espaciais disjuntas entre treino e validação evitam vazamento
+# causado pela sobreposição de patches (patch 64 / stride 32).
 
 # %%
-X, y = prepare_patches(image, labels, patch_size=64, stride=32)
+X_train, y_train, X_val, y_val = spatial_patch_split(
+    image, labels, patch_size=64, stride=32, tiles=3, val_tiles=1
+)
 
-print(f"Patches gerados: {len(X)}")
-print(f"Formato X: {X.shape}")
-print(f"Formato y: {y.shape}")
+print(f"Treino: {X_train.shape[0]} patches {X_train.shape}")
+print(f"Validação: {X_val.shape[0]} patches {X_val.shape}")
 
 # %% [markdown]
-# ## 3. Split treino/validação
+# ## 3. Pesos de classe (desbalanceamento)
 
 # %%
-val_split = 0.2
-split_idx = int(len(X) * (1 - val_split))
-
-# Embaralhamento com seed para um split aleatório e reprodutível
-rng = np.random.default_rng(42)
-perm = rng.permutation(len(X))
-
-X, y = X[perm], y[perm]
-X_train, X_val = X[:split_idx], X[split_idx:]
-y_train, y_val = y[:split_idx], y[split_idx:]
-
-print(f"Treino: {len(X_train)} patches")
-print(f"Validação: {len(X_val)} patches")
+counts = np.bincount(y_train.astype(int).ravel(), minlength=5).astype(float)
+counts[counts == 0] = 1.0
+class_weights = counts.sum() / (counts * len(counts))
+print(f"Pesos de classe: {np.round(class_weights, 4).tolist()}")
 
 # %% [markdown]
 # ## 4. Treinar U-Net
@@ -108,6 +103,7 @@ history = train_unet(
     batch_size=16,
     learning_rate=0.001,
     save_path="models/unet_model.pth",
+    class_weights=class_weights,
 )
 
 # %% [markdown]
