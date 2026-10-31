@@ -23,6 +23,7 @@ build/
 
 # Notebooks
 notebooks/*.ipynb
+!notebooks/04-unet-training-colab.ipynb
 
 # Data
 data/

@@ -11,9 +11,12 @@ from backend.app.schemas.classify import (
     ClassificationResult,
     ClassifyRequest,
     ClassifyResponse,
+    CoverageRequest,
+    CoverageResponse,
     ModelsStatusResponse,
 )
 from backend.app.services.classification_service import classify_area
+from src.gee.coverage import get_coverage, get_label_source
 
 router = APIRouter(prefix="/api/classify", tags=["classification"])
 
@@ -53,6 +56,19 @@ async def models_status(_: None = Depends(get_gee)):
     """Get availability status of all ML models."""
     status = get_models_status()
     return ModelsStatusResponse(**status)
+
+
+@router.post("/coverage", response_model=CoverageResponse)
+async def coverage_endpoint(
+    request: CoverageRequest,
+    _: None = Depends(get_gee),
+):
+    """Retorna a cobertura (Brasil/global) do polígono."""
+    polygon_coords = request.polygon.coordinates[0]
+    coverage = get_coverage(polygon_coords)
+    return CoverageResponse(
+        coverage=coverage, label_source=get_label_source(coverage)
+    )
 
 
 @router.get("/outputs/{job_id}/{filename}")

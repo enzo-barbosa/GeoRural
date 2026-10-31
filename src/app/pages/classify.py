@@ -17,6 +17,7 @@ from src.classifiers.svm import load_model as load_svm
 from src.classifiers.svm import predict_svm as predict_svm_model
 from src.classifiers.unet_cnn import build_unet, predict_unet
 from src.classifiers.unet_cnn import load_model as load_unet
+from src.config import NUM_CLASSES
 from src.gee.collector import (
     get_composite_image,
     polygon_to_ee_geometry,
@@ -27,9 +28,9 @@ from src.geo.raster_io import read_geotiff
 from src.processing.features import extract_features_ee, get_feature_bands
 
 MODEL_PATHS = {
-    "random_forest": "models/random_forest.pkl",
-    "svm": "models/svm.pkl",
-    "unet_cnn": "models/unet_model.pth",
+    "random_forest": "models/brazil_rf.pkl",
+    "svm": "models/brazil_svm.pkl",
+    "unet_cnn": "models/brazil_unet.pth",
 }
 
 
@@ -39,7 +40,7 @@ def _load_classifier(classifier: str):
     if classifier == "svm":
         return load_svm(MODEL_PATHS["svm"])
     if classifier == "unet_cnn":
-        model = build_unet(input_shape=(64, 64, 9), num_classes=5)
+        model = build_unet(input_shape=(64, 64, 9), num_classes=NUM_CLASSES)
         return load_unet(model, MODEL_PATHS["unet_cnn"])
     raise ValueError(f"Classificador não suportado: {classifier}")
 
@@ -68,7 +69,7 @@ def _get_rgb_composite(composite, satellite):
     if satellite == "sentinel2":
         rgb = composite.select(["B4", "B3", "B2"])
     else:
-        rgb = composite.select(["B4", "B3", "B2"])
+        rgb = composite.select(["SR_B4", "SR_B3", "SR_B2"])
     return rgb
 
 
@@ -99,7 +100,7 @@ def _classify_area_real(composite, satellite, classifier):
         pred = predict_svm_model(model, flat)
         pred_map = pred.reshape(h, w)
     elif classifier == "unet_cnn":
-        model = build_unet(input_shape=(64, 64, 9), num_classes=5)
+        model = build_unet(input_shape=(64, 64, 9), num_classes=NUM_CLASSES)
         model = load_unet(model, MODEL_PATHS["unet_cnn"])
         pred_map = predict_unet(model, image, patch_size=64, stride=32)
     else:

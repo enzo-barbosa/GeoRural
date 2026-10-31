@@ -3,15 +3,36 @@ export interface PolygonGeometry {
   coordinates: number[][][]
 }
 
+export type ClassifierName =
+  | 'auto'
+  | 'ensemble'
+  | 'random_forest'
+  | 'svm'
+  | 'unet_cnn'
+  | 'brazil_rf'
+  | 'brazil_svm'
+  | 'brazil_unet'
+  | 'global_rf'
+  | 'global_svm'
+
 export interface ClassifyRequest {
   polygon: PolygonGeometry
   satellite: 'sentinel2' | 'landsat8'
-  classifier: 'random_forest' | 'svm' | 'unet_cnn'
+  classifier: ClassifierName
   start_date: string
   end_date: string
   max_cloud: number
   include_topography?: boolean
   include_crop?: boolean
+}
+
+export interface CoverageRequest {
+  polygon: PolygonGeometry
+}
+
+export interface CoverageResponse {
+  coverage: 'brazil' | 'global'
+  label_source: string
 }
 
 export interface ClassStats {
@@ -70,6 +91,11 @@ export interface ClassificationResult {
   status: 'completed'
   satellite: string
   classifier: string
+  coverage: 'brazil' | 'global'
+  label_source: string | null
+  models_used: string[]
+  weights: Record<string, number>
+  confidence_mean: number | null
   start_date: string
   end_date: string
   num_images: number
@@ -99,9 +125,11 @@ export interface ClassificationPending {
 export type ClassifyResponse = ClassificationResult | ClassificationError | ClassificationPending
 
 export interface ModelsStatusResponse {
-  random_forest: boolean
-  svm: boolean
-  unet_cnn: boolean
+  brazil_rf: boolean
+  brazil_svm: boolean
+  brazil_unet: boolean
+  global_rf: boolean
+  global_svm: boolean
   crop: boolean
 }
 

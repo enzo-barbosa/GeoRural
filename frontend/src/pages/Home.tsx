@@ -35,6 +35,7 @@ const classes = [
   { name: 'Agricultura', description: 'Lavouras cultivadas', color: '#2ecc71' },
   { name: 'Solo Exposto', description: 'Terra sem cobertura', color: '#f39c12' },
   { name: 'Área Construída', description: 'Edificações, estradas', color: '#e74c3c' },
+  { name: 'Água', description: 'Rios, represas e lagos', color: '#2e86de' },
 ]
 
 export function Home() {
@@ -133,7 +134,7 @@ export function Home() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-16">
               <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">Classes de Cobertura</h2>
-              <p className="mt-4 text-lg text-gray-600">5 classes baseadas no MapBiomas</p>
+              <p className="mt-4 text-lg text-gray-600">6 classes (Brasil: MapBiomas; global: ESA WorldCover)</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               {classes.map((cls, index) => (

@@ -18,7 +18,18 @@ class ClassifyRequest(BaseModel):
 
     polygon: PolygonGeometry
     satellite: Literal["sentinel2", "landsat8"]
-    classifier: Literal["random_forest", "svm", "unet_cnn"]
+    classifier: Literal[
+        "auto",
+        "ensemble",
+        "random_forest",
+        "svm",
+        "unet_cnn",
+        "brazil_rf",
+        "brazil_svm",
+        "brazil_unet",
+        "global_rf",
+        "global_svm",
+    ] = "auto"
     start_date: date
     end_date: date
     max_cloud: int = Field(default=80, ge=0, le=100)
@@ -98,6 +109,11 @@ class ClassificationResult(BaseModel):
     status: Literal["completed"] = "completed"
     satellite: str
     classifier: str
+    coverage: Literal["brazil", "global"] = "brazil"
+    label_source: str | None = None
+    models_used: list[str] = []
+    weights: dict[str, float] = {}
+    confidence_mean: float | None = None
     start_date: str
     end_date: str
     num_images: int
@@ -134,10 +150,25 @@ ClassifyResponse = ClassificationResult | ClassificationError | ClassificationPe
 class ModelsStatusResponse(BaseModel):
     """Model availability status."""
 
-    random_forest: bool
-    svm: bool
-    unet_cnn: bool
+    brazil_rf: bool = False
+    brazil_svm: bool = False
+    brazil_unet: bool = False
+    global_rf: bool = False
+    global_svm: bool = False
     crop: bool = False
+
+
+class CoverageRequest(BaseModel):
+    """Polígono para consulta de cobertura."""
+
+    polygon: PolygonGeometry
+
+
+class CoverageResponse(BaseModel):
+    """Cobertura (Brasil/global) de um polígono."""
+
+    coverage: Literal["brazil", "global"]
+    label_source: str
 
 
 class HealthResponse(BaseModel):

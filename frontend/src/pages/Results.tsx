@@ -31,9 +31,11 @@ import {
 const CLASS_COLORS: Record<string, string> = {
   'Vegetação Nativa': '#1a5276',
   'Pastagem': '#27ae60',
+  'Pastagem / Veg. Herbácea': '#27ae60',
   'Agricultura': '#2ecc71',
   'Solo Exposto': '#f39c12',
   'Área Construída': '#e74c3c',
+  'Água': '#2e86de',
 }
 
 const CROP_COLORS: Record<string, string> = {
@@ -189,7 +191,7 @@ export function Results() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardContent className="py-4">
               <div className="flex items-center gap-3">
@@ -214,6 +216,29 @@ export function Results() {
                   <p className="font-semibold text-gray-900">
                     {result.classifier.replace('_', ' ').toUpperCase()}
                   </p>
+                  {result.models_used?.length > 0 && (
+                    <p className="text-xs text-gray-500">
+                      {result.models_used.join(' + ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-sky-100 rounded-lg">
+                  <Layers className="h-5 w-5 text-sky-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Cobertura</p>
+                  <p className="font-semibold text-gray-900">
+                    {result.coverage === 'global' ? 'Global' : 'Brasil'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {result.label_source ?? '—'}
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -227,6 +252,11 @@ export function Results() {
                 <div>
                   <p className="text-sm text-gray-500">Imagens</p>
                   <p className="font-semibold text-gray-900">{result.num_images}</p>
+                  {result.confidence_mean != null && (
+                    <p className="text-xs text-gray-500">
+                      Confiança média: {(result.confidence_mean * 100).toFixed(1)}%
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -563,7 +593,9 @@ export function Results() {
                 </div>
               </div>
               <p className="mt-4 text-xs text-gray-500">
-                Estimativa baseada na série temporal NDVI/EVI (perfis fenológicos). Use como apoio à decisão.
+                Estimativa baseada na série temporal NDVI/EVI e em rótulos
+                MapBiomas (Brasil). Milho é aproximado pela classe de outras
+                lavouras temporárias; use como apoio à decisão.
               </p>
             </CardContent>
           </Card>

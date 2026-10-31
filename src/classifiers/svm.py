@@ -15,6 +15,7 @@ def train_svm(
     gamma: str = "scale",
     random_state: int = 42,
     verbose: bool = True,
+    probability: bool = False,
 ):
     """Treina o modelo SVM.
 
@@ -36,6 +37,7 @@ def train_svm(
     print(f"  - Kernel: {kernel}")
     print(f"  - C: {C}")
     print(f"  - Gamma: {gamma}")
+    print(f"  - Probabilidade: {probability}")
 
     pipeline = Pipeline(
         [
@@ -48,6 +50,7 @@ def train_svm(
                     gamma=gamma,
                     random_state=random_state,
                     verbose=verbose,
+                    probability=probability,
                 ),
             ),
         ]

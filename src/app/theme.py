@@ -1,5 +1,7 @@
 """Tema visual e CSS customizado para a aplicação."""
 
+from src.config import CLASS_COLORS, CLASS_NAMES  # noqa: F401
+
 PRIMARY_COLOR = "#2e7d32"
 SECONDARY_COLOR = "#1565c0"
 BACKGROUND_COLOR = "#f5f5f5"
@@ -9,15 +11,7 @@ ERROR_COLOR = "#c62828"
 SUCCESS_COLOR = "#2e7d32"
 WARNING_COLOR = "#f9a825"
 
-CLASS_COLORS = {
-    "Vegetação Nativa": "#1a5276",
-    "Pastagem": "#27ae60",
-    "Agricultura": "#2ecc71",
-    "Solo Exposto": "#f39c12",
-    "Área Construída": "#e74c3c",
-}
 
-CLASS_NAMES = list(CLASS_COLORS.keys())
 
 
 def get_css() -> str:

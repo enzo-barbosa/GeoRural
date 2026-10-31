@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { classifyApi, healthApi } from '@/services/api'
-import type { ClassifyRequest, ClassifyResponse, ModelsStatusResponse } from '@/types/api'
+import type { ClassifyRequest } from '@/types/api'
 
 export function useHealth() {
   return useQuery({

@@ -4,16 +4,9 @@ import ee
 import numpy as np
 import pandas as pd
 
+from src.config import CLASS_NAMES
 from src.processing.indices import calculate_ndvi_ee
 from src.processing.texture import calculate_glcm_ee
-
-CLASS_NAMES = [
-    "Vegetação Nativa",
-    "Pastagem",
-    "Agricultura",
-    "Solo Exposto",
-    "Área Construída",
-]
 
 
 def extract_features_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image:
@@ -104,7 +97,7 @@ def extract_real_samples(
     np.random.seed(seed)
     samples = []
 
-    for class_id in range(5):
+    for class_id in range(len(CLASS_NAMES)):
         mask = ground_truth == class_id
         ys, xs = np.where(mask)
 
@@ -136,7 +129,7 @@ def extract_real_samples(
 
     df = pd.DataFrame(samples)
     print(f"Amostras extraídas: {len(df)} pixels")
-    for class_id in range(5):
+    for class_id in range(len(CLASS_NAMES)):
         n = len(df[df["class_id"] == class_id])
         print(f"  Classe {class_id} ({CLASS_NAMES[class_id]}): {n} pixels")
     return df

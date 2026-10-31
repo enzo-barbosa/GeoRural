@@ -1,8 +1,13 @@
 """Rede Neural Convolucional U-Net para segmentação semântica."""
 
+import glob
+import os
+
 import numpy as np
 import torch
 from torch import nn, optim
+
+from src.config import IGNORE_LABEL, NUM_CLASSES
 
 
 class DoubleConv(nn.Module):
@@ -76,7 +81,10 @@ class UNet(nn.Module):
     """Arquitetura U-Net para segmentação semântica de imagens de satélite."""
 
     def __init__(
-        self, n_channels: int = 10, n_classes: int = 5, bilinear: bool = False
+        self,
+        n_channels: int = 9,
+        n_classes: int = NUM_CLASSES,
+        bilinear: bool = False,
     ):
         super().__init__()
         self.n_channels = n_channels
@@ -111,7 +119,8 @@ class UNet(nn.Module):
 
 
 def build_unet(
-    input_shape: tuple[int, int, int] = (64, 64, 10), num_classes: int = 5
+    input_shape: tuple[int, int, int] = (64, 64, 9),
+    num_classes: int = NUM_CLASSES,
 ):
     """Constrói a arquitetura U-Net.
 
@@ -232,11 +241,56 @@ def spatial_patch_split(
     )
 
 
+def load_unet_tiles(directory: str) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Carrega todos os tiles ``*_image.npy`` de um diretório."""
+    tiles = {}
+    for image_path in sorted(glob.glob(os.path.join(directory, "*_image.npy"))):
+        name = os.path.basename(image_path).replace("_image.npy", "")
+        labels_path = os.path.join(directory, f"{name}_labels.npy")
+        if not os.path.exists(labels_path):
+            continue
+        tiles[name] = (np.load(image_path), np.load(labels_path))
+    if not tiles:
+        raise FileNotFoundError(f"Nenhum tile encontrado em {directory}")
+    return tiles
+
+
+def leave_one_tile_out(
+    tiles: dict[str, tuple[np.ndarray, np.ndarray]],
+    val_tile: str,
+    patch_size: int = 64,
+    stride: int = 32,
+):
+    """Monta patches de treino/validação deixando um tile inteiro de fora."""
+    if val_tile not in tiles:
+        raise KeyError(f"Tile de validação desconhecido: {val_tile}")
+
+    train_img, train_lbl, val_img, val_lbl = [], [], [], []
+    for name, (image, labels) in tiles.items():
+        patches_img, patches_lbl = prepare_patches(
+            image, labels, patch_size=patch_size, stride=stride
+        )
+        if name == val_tile:
+            val_img.append(patches_img)
+            val_lbl.append(patches_lbl)
+        else:
+            train_img.append(patches_img)
+            train_lbl.append(patches_lbl)
+
+    return (
+        np.concatenate(train_img, axis=0),
+        np.concatenate(train_lbl, axis=0),
+        np.concatenate(val_img, axis=0),
+        np.concatenate(val_lbl, axis=0),
+    )
+
+
 def compile_model(
     model: nn.Module,
     learning_rate: float = 0.001,
     device: str | None = None,
     class_weights: np.ndarray | None = None,
+    ignore_index: int = IGNORE_LABEL,
 ):
     """Compila o modelo com otimizador Adam e loss apropriada.
 
@@ -257,9 +311,11 @@ def compile_model(
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     if class_weights is not None:
         weights = torch.tensor(class_weights, dtype=torch.float32)
-        criterion = nn.CrossEntropyLoss(weight=weights.to(device))
+        criterion = nn.CrossEntropyLoss(
+            weight=weights.to(device), ignore_index=ignore_index
+        )
     else:
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
 
     print(f"Modelo compilado no dispositivo: {device}")
     print(model)
@@ -278,6 +334,7 @@ def train_unet(
     learning_rate: float = 0.001,
     save_path: str = "models/unet_model.pth",
     class_weights: np.ndarray | None = None,
+    ignore_index: int = IGNORE_LABEL,
 ):
     """Treina o modelo U-Net.
 
@@ -297,7 +354,11 @@ def train_unet(
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, optimizer, criterion = compile_model(
-        model, learning_rate, device, class_weights=class_weights
+        model,
+        learning_rate,
+        device,
+        class_weights=class_weights,
+        ignore_index=ignore_index,
     )
 
     # Converter numpy arrays para tensors PyTorch
@@ -333,13 +394,18 @@ def train_unet(
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item() * batch_y.numel()
-            _, predicted = torch.max(outputs.data, 1)
-            train_total += batch_y.numel()
-            train_correct += (predicted == batch_y).sum().item()
+            valid = batch_y != ignore_index
+            valid_count = int(valid.sum().item())
+            if valid_count == 0:
+                continue
 
-        train_loss /= train_total
-        train_acc = train_correct / train_total
+            train_loss += loss.item() * valid_count
+            _, predicted = torch.max(outputs.data, 1)
+            train_total += valid_count
+            train_correct += ((predicted == batch_y) & valid).sum().item()
+
+        train_loss /= max(train_total, 1)
+        train_acc = train_correct / max(train_total, 1)
 
         model.eval()
         val_loss = 0.0
@@ -352,13 +418,18 @@ def train_unet(
                 outputs = model(batch_x)
                 loss = criterion(outputs, batch_y)
 
-                val_loss += loss.item() * batch_y.numel()
-                _, predicted = torch.max(outputs.data, 1)
-                val_total += batch_y.numel()
-                val_correct += (predicted == batch_y).sum().item()
+                valid = batch_y != ignore_index
+                valid_count = int(valid.sum().item())
+                if valid_count == 0:
+                    continue
 
-        val_loss /= val_total
-        val_acc = val_correct / val_total
+                val_loss += loss.item() * valid_count
+                _, predicted = torch.max(outputs.data, 1)
+                val_total += valid_count
+                val_correct += ((predicted == batch_y) & valid).sum().item()
+
+        val_loss /= max(val_total, 1)
+        val_acc = val_correct / max(val_total, 1)
 
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
@@ -367,6 +438,7 @@ def train_unet(
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
             torch.save(model.state_dict(), save_path)
 
         if (epoch + 1) % 10 == 0:
@@ -398,43 +470,72 @@ def load_model(model: nn.Module, filepath: str, device: str | None = None):
     return model
 
 
-def predict_unet(
-    model: nn.Module, image: np.ndarray, patch_size: int = 64, stride: int = 32
-):
-    """Aplica o modelo em uma imagem completa.
+def _pad_to_grid(
+    image: np.ndarray, patch_size: int, stride: int
+) -> tuple[np.ndarray, int, int]:
+    """Preenche bordas para que todos os pixels sejam cobertos por patches."""
+    height, width = image.shape[:2]
+    if height < patch_size or width < patch_size:
+        raise ValueError(
+            f"Imagem ({height}x{width}) menor que patch_size ({patch_size})."
+        )
 
-    Args:
-        model: Modelo U-Net treinado
-        image: Array da imagem (height, width, channels)
-        patch_size: Tamanho do patch
-        stride: Passo entre patches
+    pad_h = (stride - (height - patch_size) % stride) % stride
+    pad_w = (stride - (width - patch_size) % stride) % stride
+    if pad_h or pad_w:
+        image = np.pad(
+            image, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge"
+        )
+    return image, height, width
 
-    Returns:
-        Mapa de classificação (height, width)
+
+def predict_unet_proba(
+    model: nn.Module,
+    image: np.ndarray,
+    patch_size: int = 64,
+    stride: int = 32,
+    num_classes: int = NUM_CLASSES,
+) -> np.ndarray:
+    """Aplica a U-Net e retorna probabilidades (height, width, num_classes).
+
+    As probabilidades dos patches sobrepostos são acumuladas e normalizadas,
+    em vez de média de índices de classe (que era incorreta).
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     model.eval()
 
-    h, w = image.shape[:2]
-    prediction_map = np.zeros((h, w), dtype=np.uint8)
+    padded, original_h, original_w = _pad_to_grid(image, patch_size, stride)
+    h, w = padded.shape[:2]
+
+    proba_map = np.zeros((h, w, num_classes), dtype=np.float32)
     count_map = np.zeros((h, w), dtype=np.float32)
 
     with torch.no_grad():
         for y in range(0, h - patch_size + 1, stride):
             for x in range(0, w - patch_size + 1, stride):
-                patch = image[y : y + patch_size, x : x + patch_size]
+                patch = padded[y : y + patch_size, x : x + patch_size]
                 patch_tensor = (
                     torch.FloatTensor(patch).permute(2, 0, 1).unsqueeze(0).to(device)
                 )
 
                 output = model(patch_tensor)
-                pred = torch.argmax(output, dim=1).cpu().numpy()[0]
+                probs = torch.softmax(output, dim=1)[0].cpu().numpy()
+                probs = np.moveaxis(probs, 0, -1)
 
-                prediction_map[y : y + patch_size, x : x + patch_size] += pred
+                proba_map[y : y + patch_size, x : x + patch_size] += probs
                 count_map[y : y + patch_size, x : x + patch_size] += 1
 
     count_map[count_map == 0] = 1
-    prediction_map = (prediction_map / count_map).astype(np.uint8)
+    proba_map /= count_map[..., None]
+    return proba_map[:original_h, :original_w]
 
-    return prediction_map
+
+def predict_unet(
+    model: nn.Module, image: np.ndarray, patch_size: int = 64, stride: int = 32
+):
+    """Aplica o modelo em uma imagem completa e retorna o mapa de classes."""
+    probabilities = predict_unet_proba(
+        model, image, patch_size=patch_size, stride=stride
+    )
+    return np.argmax(probabilities, axis=-1).astype(np.uint8)

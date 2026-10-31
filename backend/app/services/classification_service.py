@@ -1,5 +1,6 @@
 """Core classification service logic."""
 
+import json
 import os
 import tempfile
 import uuid
@@ -12,17 +13,24 @@ import requests
 from PIL import Image
 
 from backend.app.config import get_settings
-from backend.app.dependencies.models import get_cached_model
+from backend.app.dependencies.models import check_model_exists, get_cached_model
 from src.classifiers.crop_classifier import load_model as load_crop_model
 from src.classifiers.crop_classifier import predict_crop_map
-from src.classifiers.random_forest import predict_random_forest as predict_rf_model
-from src.classifiers.svm import predict_svm as predict_svm_model
-from src.classifiers.unet_cnn import predict_unet
+from src.classifiers.ensemble import (
+    confidence_from_proba,
+    load_weights,
+    normalize_weights,
+    soft_vote,
+    weights_from_metrics,
+)
+from src.classifiers.unet_cnn import predict_unet_proba
 from src.config import (
     CLASS_COLORS,
     CLASS_NAMES,
+    CLASS_NAMES_GLOBAL,
     CROP_COLORS,
     CROP_NAMES,
+    NUM_CLASSES,
     SLOPE_CLASS_COLORS,
     SLOPE_CLASS_NAMES,
 )
@@ -31,6 +39,7 @@ from src.gee.collector import (
     polygon_to_ee_geometry,
     search_images,
 )
+from src.gee.coverage import get_coverage, get_label_source
 from src.gee.crop_features import get_crop_feature_image
 from src.gee.preprocessor import preprocess_image
 from src.gee.topography import (
@@ -107,8 +116,176 @@ def _get_rgb_composite(composite, satellite: str):
     return rgb
 
 
-def _classify_area_real(composite, satellite: str, classifier_name: str, model):
-    """Apply trained model to image and return classification map and RGB."""
+def _align_probabilities(
+    probabilities: np.ndarray, classes, num_classes: int = NUM_CLASSES
+) -> np.ndarray:
+    """Alinha colunas de probabilidade à ordem global de classes (0..N-1)."""
+    probabilities = np.asarray(probabilities, dtype=np.float32)
+    classes = [int(c) for c in np.asarray(classes).tolist()]
+
+    if probabilities.shape[1] == num_classes and classes == list(range(num_classes)):
+        return probabilities
+
+    aligned = np.zeros((probabilities.shape[0], num_classes), dtype=np.float32)
+    for column, class_id in enumerate(classes):
+        if 0 <= class_id < num_classes:
+            aligned[:, class_id] = probabilities[:, column]
+    return aligned
+
+
+def _model_probabilities(model, features: np.ndarray):
+    """Retorna (probabilidades, classes) para RF/SVM, com fallbacks."""
+    if hasattr(model, "predict_proba"):
+        try:
+            return model.predict_proba(features), model.classes_
+        except (AttributeError, ValueError):
+            pass
+
+    if hasattr(model, "decision_function"):
+        scores = np.asarray(model.decision_function(features), dtype=np.float32)
+        if scores.ndim == 1:
+            scores = np.column_stack([-scores, scores])
+        scores -= scores.max(axis=1, keepdims=True)
+        exp_scores = np.exp(scores)
+        return exp_scores / exp_scores.sum(axis=1, keepdims=True), model.classes_
+
+    predictions = model.predict(features).astype(int)
+    probabilities = np.zeros((len(predictions), NUM_CLASSES), dtype=np.float32)
+    probabilities[np.arange(len(predictions)), predictions] = 1.0
+    return probabilities, model.classes_
+
+
+def _domain_model_name(classifier_name: str, coverage: str) -> str:
+    """Traduz o nome público para o modelo canônico do domínio."""
+    prefix = "brazil" if coverage == "brazil" else "global"
+    mapping = {
+        "random_forest": f"{prefix}_rf",
+        "svm": f"{prefix}_svm",
+        "unet_cnn": f"{prefix}_unet",
+    }
+    return mapping.get(classifier_name, classifier_name)
+
+
+def _fill_missing_weights(
+    selected: dict[str, float], models: list[str]
+) -> dict[str, float]:
+    """Completa modelos sem peso com a média dos pesos conhecidos."""
+    if not selected:
+        return {}
+    default = sum(selected.values()) / len(selected)
+    return {name: selected.get(name, default) for name in models}
+
+
+def _load_ensemble_weights(coverage: str, models: list[str]) -> dict[str, float]:
+    """Pesos explícitos ou derivados do Kappa da validação espacial."""
+    settings = get_settings()
+    outputs = Path(settings.OUTPUTS_DIR)
+
+    explicit = load_weights(str(outputs / "ensemble_weights.json"))
+    if explicit:
+        selected = {name: explicit[name] for name in models if name in explicit}
+        if selected:
+            return _fill_missing_weights(selected, models)
+
+    metrics_path = outputs / (
+        "metrics_brazil.json" if coverage == "brazil" else "metrics_global.json"
+    )
+    if metrics_path.exists():
+        try:
+            with open(metrics_path, encoding="utf-8") as f:
+                metrics = json.load(f)
+        except (OSError, ValueError):
+            metrics = {}
+
+        alias = {
+            "random_forest": f"{'brazil' if coverage == 'brazil' else 'global'}_rf",
+            "svm": f"{'brazil' if coverage == 'brazil' else 'global'}_svm",
+            "unet_cnn": "brazil_unet",
+        }
+        mapped = {
+            alias.get(key, key): value
+            for key, value in weights_from_metrics(metrics).items()
+        }
+        selected = {name: mapped[name] for name in models if name in mapped}
+        if selected:
+            return _fill_missing_weights(selected, models)
+
+    return {}
+
+
+def _predict_probability_maps(
+    image: np.ndarray,
+    satellite: str,
+    coverage: str,
+    classifier_name: str,
+) -> tuple[np.ndarray, np.ndarray | None, list[str], dict[str, float]]:
+    """Executa um modelo ou o ensemble e retorna mapa + probabilidades."""
+    height, width = image.shape[:2]
+    flat = image.reshape(-1, image.shape[-1])
+
+    if classifier_name in {"auto", "ensemble"}:
+        prefix = "brazil" if coverage == "brazil" else "global"
+        names = [
+            name
+            for name in (f"{prefix}_rf", f"{prefix}_svm")
+            if check_model_exists(name)
+        ]
+        if (
+            coverage == "brazil"
+            and satellite == "sentinel2"
+            and check_model_exists("brazil_unet")
+        ):
+            names.append("brazil_unet")
+    else:
+        names = [_domain_model_name(classifier_name, coverage)]
+
+    if not names:
+        raise RuntimeError(
+            "Nenhum modelo disponível para esta cobertura. Treine os modelos."
+        )
+
+    prefix = "brazil" if coverage == "brazil" else "global"
+    if any(name.startswith(("brazil_", "global_")) and not name.startswith(prefix)
+           for name in names):
+        raise RuntimeError(
+            "Modelo incompatível com a cobertura detectada "
+            f"({coverage}). Use 'auto' ou um modelo do domínio correto."
+        )
+
+    probabilities: dict[str, np.ndarray] = {}
+    for name in names:
+        model = get_cached_model(name)
+
+        if name.endswith("_unet"):
+            if satellite != "sentinel2":
+                raise RuntimeError("A U-Net está disponível apenas para Sentinel-2.")
+            proba = predict_unet_proba(
+                model, image, patch_size=64, stride=32, num_classes=NUM_CLASSES
+            )
+            probabilities[name] = proba.reshape(height, width, NUM_CLASSES)
+        else:
+            proba, classes = _model_probabilities(model, flat)
+            aligned = _align_probabilities(proba, classes)
+            probabilities[name] = aligned.reshape(height, width, NUM_CLASSES)
+
+    weights = _load_ensemble_weights(coverage, names) if len(names) > 1 else {}
+    combined = soft_vote(probabilities, weights)
+    pred_map = np.argmax(combined, axis=-1).astype(np.uint8)
+
+    normalized = {
+        name: round(value, 4)
+        for name, value in normalize_weights(names, weights).items()
+    }
+    return pred_map, combined, names, normalized
+
+
+def _classify_area_real(
+    composite,
+    satellite: str,
+    coverage: str,
+    classifier_name: str,
+):
+    """Apply trained model(s) to image and return maps, RGB and metadata."""
     scale = 10 if satellite == "sentinel2" else 30
 
     rgb_img = _get_rgb_composite(composite, satellite)
@@ -121,26 +298,15 @@ def _classify_area_real(composite, satellite: str, classifier_name: str, model):
     )
 
     if data is None or data.size == 0 or rgb_data is None or rgb_data.size == 0:
-        return None, None, None
+        return None, None, None, None, [], {}
 
     image = np.moveaxis(data, 0, -1)
-    h, w = image.shape[:2]
-
-    if classifier_name == "random_forest":
-        flat = image.reshape(-1, image.shape[-1])
-        pred = predict_rf_model(model, flat)
-        pred_map = pred.reshape(h, w)
-    elif classifier_name == "svm":
-        flat = image.reshape(-1, image.shape[-1])
-        pred = predict_svm_model(model, flat)
-        pred_map = pred.reshape(h, w)
-    elif classifier_name == "unet_cnn":
-        pred_map = predict_unet(model, image, patch_size=64, stride=32)
-    else:
-        return None, None, None
+    pred_map, probabilities, models_used, weights = _predict_probability_maps(
+        image, satellite, coverage, classifier_name
+    )
 
     rgb = np.moveaxis(rgb_data, 0, -1)
-    return pred_map, meta_all, rgb
+    return pred_map, probabilities, meta_all, rgb, models_used, weights
 
 
 def _normalize_rgb(rgb_data: np.ndarray) -> np.ndarray:
@@ -209,9 +375,7 @@ def _save_image(image: Image.Image, job_id: str, suffix: str) -> str:
     return f"/outputs/{job_id}/{suffix}.png"
 
 
-def _compute_topography(
-    geometry, pred_map, transform, crs, mask, job_id
-):
+def _compute_topography(geometry, pred_map, transform, crs, mask, job_id):
     """Executa a análise topográfica e retorna (stats, layer)."""
     scale = 30
     dem = get_dem(geometry)
@@ -248,8 +412,16 @@ def _compute_topography(
 
 
 def _compute_crop(
-    geometry, pred_map, transform, crs, mask, job_id, satellite, start_date,
-    end_date, max_cloud,
+    geometry,
+    pred_map,
+    transform,
+    crs,
+    mask,
+    job_id,
+    satellite,
+    start_date,
+    end_date,
+    max_cloud,
 ):
     """Executa a classificação de tipo de cultivo e retorna (stats, layer)."""
     settings = get_settings()
@@ -309,6 +481,18 @@ async def classify_area(
 
     geometry = polygon_to_ee_geometry(polygon_coords)
 
+    try:
+        coverage = get_coverage(polygon_coords)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "error": f"Falha ao detectar cobertura: {exc}",
+        }
+
+    label_source = get_label_source(coverage)
+    crop_allowed = include_crop and coverage == "brazil"
+
     collection = search_images(geometry, start_date, end_date, satellite, max_cloud)
     num_images = collection.size().getInfo()
 
@@ -324,17 +508,10 @@ async def classify_area(
     composite = extract_features_ee(composite, satellite)
 
     try:
-        model = get_cached_model(classifier_name)
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "job_id": job_id,
-            "status": "failed",
-            "error": f"Falha ao carregar modelo: {exc}",
-        }
-
-    try:
-        pred_map, meta, rgb_image = _classify_area_real(
-            composite, satellite, classifier_name, model
+        pred_map, probabilities, meta, rgb_image, models_used, weights = (
+            _classify_area_real(
+                composite, satellite, coverage, classifier_name
+            )
         )
     except Exception as exc:  # noqa: BLE001
         return {
@@ -356,8 +533,10 @@ async def classify_area(
     mask = polygon_mask(polygon_coords, transform, crs, pred_map.shape)
     bounds = raster_bounds_lonlat(transform, crs, pred_map.shape)
 
+    class_names = CLASS_NAMES if coverage == "brazil" else CLASS_NAMES_GLOBAL
+
     classification_img = _layer_image(
-        pred_map, CLASS_NAMES, CLASS_COLORS, mask
+        pred_map, class_names, CLASS_COLORS, mask
     )
     classification_url = _save_image(classification_img, job_id, "classification")
 
@@ -368,7 +547,7 @@ async def classify_area(
         rgb_img = Image.fromarray(rgb_normalized, mode="RGB")
         rgb_url = _save_image(rgb_img, job_id, "rgb")
 
-        class_rgb = colorize_by_name(pred_map, CLASS_NAMES, CLASS_COLORS)
+        class_rgb = colorize_by_name(pred_map, class_names, CLASS_COLORS)
         blended = blend(rgb_normalized, class_rgb, alpha=0.5)
         blended[~mask] = rgb_normalized[~mask]
         overlay_img = Image.fromarray(blended, mode="RGB")
@@ -379,7 +558,7 @@ async def classify_area(
         pred_map, transform, crs, valid_mask=mask
     )
     poly = polygon_metrics(polygon_coords)
-    class_areas = _class_areas(raster_metrics, CLASS_NAMES)
+    class_areas = _class_areas(raster_metrics, class_names)
     total_area_ha = poly.get("area_ha") or raster_metrics["total_area_ha"]
     measurements = {
         "total_area_ha": round(float(total_area_ha), 4),
@@ -388,12 +567,17 @@ async def classify_area(
         "parcels": int(sum(c["parcels"] for c in class_areas)),
     }
 
+    confidence_mean = None
+    if probabilities is not None and mask.any():
+        confidence = confidence_from_proba(probabilities)
+        confidence_mean = round(float(confidence[mask].mean()), 4)
+
     layers = [
         {
             "name": "classification",
             "label": "Uso e Cobertura do Solo",
             "image_url": classification_url,
-            "legend": _legend(CLASS_NAMES, CLASS_COLORS),
+            "legend": _legend(class_names, CLASS_COLORS),
         }
     ]
 
@@ -409,7 +593,7 @@ async def classify_area(
             topography = None
 
     crop_stats = None
-    if include_crop:
+    if crop_allowed:
         try:
             crop_stats, crop_layer = _compute_crop(
                 geometry,
@@ -433,6 +617,11 @@ async def classify_area(
         "status": "completed",
         "satellite": satellite,
         "classifier": classifier_name,
+        "coverage": coverage,
+        "label_source": label_source,
+        "models_used": models_used,
+        "weights": weights,
+        "confidence_mean": confidence_mean,
         "start_date": start_date,
         "end_date": end_date,
         "num_images": num_images,

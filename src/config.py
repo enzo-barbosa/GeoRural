@@ -1,13 +1,26 @@
 """Configurações do projeto."""
 
 # Ordem unificada (bate com src/gee/ground_truth.py e src/processing/features.py):
-# 0: Vegetação Nativa, 1: Pastagem, 2: Agricultura, 3: Solo Exposto, 4: Área Construída
+# 0: Vegetação Nativa, 1: Pastagem, 2: Agricultura,
+# 3: Solo Exposto, 4: Área Construída, 5: Água
 CLASS_NAMES = [
     "Vegetação Nativa",
     "Pastagem",
     "Agricultura",
     "Solo Exposto",
     "Área Construída",
+    "Água",
+]
+
+# Fora do Brasil o rótulo "Pastagem" cobre grassland (pasto manejado ou campo
+# natural), pois WorldCover/Dynamic World não separam essas classes.
+CLASS_NAMES_GLOBAL = [
+    "Vegetação Nativa",
+    "Pastagem / Veg. Herbácea",
+    "Agricultura",
+    "Solo Exposto",
+    "Área Construída",
+    "Água",
 ]
 
 CLASS_IDS = {
@@ -16,15 +29,21 @@ CLASS_IDS = {
     "agricultura": 2,
     "solo_exposto": 3,
     "área_construída": 4,
+    "água": 5,
 }
 
 CLASS_COLORS = {
     "Vegetação Nativa": "#1a5276",
     "Pastagem": "#27ae60",
+    "Pastagem / Veg. Herbácea": "#27ae60",
     "Agricultura": "#2ecc71",
     "Solo Exposto": "#f39c12",
     "Área Construída": "#e74c3c",
+    "Água": "#2e86de",
 }
+
+NUM_CLASSES = len(CLASS_NAMES)
+IGNORE_LABEL = 255
 
 CROP_NAMES = [
     "Cana-de-açúcar",
@@ -67,7 +86,7 @@ SVM_PARAMS = {"kernel": "rbf", "C": 100, "gamma": "scale"}
 
 UNET_PARAMS = {
     "input_shape": (64, 64, 9),  # 9 canais = 6 bandas + NDVI + 2 texturas
-    "num_classes": 5,
+    "num_classes": NUM_CLASSES,
     "epochs": 100,
     "learning_rate": 0.001,
     "batch_size": 16,

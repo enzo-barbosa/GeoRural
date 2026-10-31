@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-CLASS_NAMES = ["Veg. Nativa", "Pastagem", "Agricultura", "Solo Exposto", "Área Const."]
+from src.config import CLASS_NAMES
 
 
 def plot_confusion_matrix(
@@ -18,7 +18,8 @@ def plot_confusion_matrix(
         y_pred: Valores previstos
         save_path: Caminho para salvar a figura (None = não salvar)
     """
-    cm = confusion_matrix(y_true, y_pred)
+    labels = list(range(len(CLASS_NAMES)))
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
 
     cm_pct = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
 

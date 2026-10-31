@@ -11,13 +11,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
-CROP_NAMES = [
-    "Cana-de-açúcar",
-    "Citros",
-    "Pastagem",
-    "Soja",
-    "Milho",
-]
+from src.config import CROP_NAMES
 
 # NDVI de referência por mês (Jan..Dez) para o hemisfério sul.
 CROP_PROFILES_NDVI = {

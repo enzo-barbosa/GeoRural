@@ -5,9 +5,11 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 ## Funcionalidades
 
 - Download de imagens Sentinel-2 e Landsat 8 via Google Earth Engine
-- Classificação com Random Forest, SVM e U-Net CNN
-- Interface web interativa com mapa
-- Identificação de áreas ociosas
+- **Cobertura híbrida:** Brasil com MapBiomas (detalhado) e exterior com ESA WorldCover, roteada automaticamente
+- **6 classes:** Vegetação Nativa, Pastagem, Agricultura, Solo Exposto, Área Construída e Água
+- Classificação com Random Forest, SVM e U-Net CNN, incluindo **ensemble por votação suave**
+- Medidas reais (área/perímetro), topografia (NASADEM) e tipo de cultivo (Brasil)
+- Interface web React com mapa Leaflet e camadas georreferenciadas
 
 ## Requisitos
 
@@ -40,32 +42,47 @@ pip install -e ".[dev]"
 
 ## Uso
 
-1. Extraia os dados (CSV balanceado para RF/SVM e rasters para a U-Net):
+1. Extraia as amostras por domínio (cada região/ano gera CSV parcial + manifesto):
    ```bash
-   python src/gee/extract_samples_cli.py --satellite sentinel2 --start 2023-01-01 --end 2023-12-31 --max-cloud 80
-   python src/gee/build_unet_dataset.py --satellite sentinel2 --start 2023-01-01 --end 2023-12-31 --max-cloud 80
-   ```
-2. Treine os classificadores clássicos (Random Forest e SVM):
-   ```bash
-   python notebooks/03-classifiers-test.py
-   ```
-   Gera: `models/random_forest.pkl` e `models/svm.pkl`
+   # Brasil, 2019–2023, 6 biomas + polos agrícolas
+   python src/gee/extract_samples_cli.py --domain brazil --regions all --years 2019-2023 --samples-per-class 200 --resume
 
-3. Treine a U-Net (PyTorch — TensorFlow NÃO é usado; GPU recomendada):
-   ```bash
-   python notebooks/04-unet-training.py
-   # ou
-   jupyter notebook notebooks/04-unet-training.ipynb
-   ```
-   Gera: `models/unet_model.pth`
+   # Global, WorldCover 2021, 15 regiões
+   python src/gee/extract_samples_cli.py --domain global --regions all --years 2021 --label-source worldcover --samples-per-class 200 --resume
 
-4. Execute a aplicação:
+   # Cultivo (Brasil-only)
+   python src/gee/extract_samples_cli.py --task crop --domain brazil --regions all --years 2019-2023 --samples-per-crop 300 --resume
+   ```
+2. Treine RF/SVM (validação leave-one-bioma-out) e cultivo:
    ```bash
-   streamlit run run_app.py
+   python notebooks/03-classifiers-test.py          # Brasil
+   python notebooks/03-classifiers-test.py global   # global (ou 07-global-classifiers.py)
+   python notebooks/05-crop-classifier.py
+   ```
+   Gera: `models/brazil_rf.pkl`, `models/brazil_svm.pkl`, `models/global_rf.pkl`,
+   `models/global_svm.pkl`, `models/crop_classifier.pkl` e `outputs/metrics_*.json`.
+
+3. Avalie o ensemble (gera `outputs/ensemble_weights.json`):
+   ```bash
+   python notebooks/06-ensemble-eval.py
    ```
 
-> RF/SVM e U-Net usam a **mesma definição de features** (`get_feature_bands`):
-> 6 bandas (B2, B3, B4, B8, B11, B12) + NDVI + 2 texturas GLCM.
+4. Rasters da U-Net (tiles pequenos por bioma):
+   ```bash
+   python src/gee/build_unet_dataset.py --regions all --year 2023 --start 2023-01-01 --end 2023-12-31
+   ```
+   Treine no **Colab (T4)** com `notebooks/04-unet-training-colab.ipynb`
+   (leave-one-tile-out, 6 classes, pesos de classe). Gera `models/brazil_unet.pth`.
+
+5. Execute backend + frontend:
+   ```bash
+   uvicorn backend.app.main:app --reload
+   cd frontend && npm install && npm run dev
+   ```
+
+> Features unificadas (`get_feature_bands`): 6 bandas (B2, B3, B4, B8, B11, B12)
+> + NDVI + 2 texturas GLCM. O classificador de cultivo usa 24 features
+> NDVI/EVI mensais.
 
 ## Estrutura do Projeto
 

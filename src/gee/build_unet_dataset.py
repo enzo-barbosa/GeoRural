@@ -27,10 +27,12 @@ import numpy as np
 import rasterio
 import requests
 
+from src.config import CLASS_NAMES, IGNORE_LABEL
 from src.gee.auth import initialize_gee
 from src.gee.collector import get_composite_image, polygon_to_ee_geometry, search_images
 from src.gee.ground_truth import get_mapbiomas_layer, reclassify_mapbiomas
 from src.gee.preprocessor import preprocess_image
+from src.gee.regions import resolve_unet_regions
 from src.processing.features import extract_features_ee, get_feature_bands
 
 DEFAULT_POLYGON = [
@@ -92,7 +94,7 @@ def download_array(ee_image: ee.Image, region: ee.Geometry, scale: int) -> np.nd
 
 
 def run(
-    polygon,
+    geometry,
     start_date,
     end_date,
     satellite,
@@ -102,10 +104,11 @@ def run(
     out_dir,
     image_name,
     labels_name,
+    meta_name: str = "meta.json",
+    initialize: bool = True,
 ):
-    initialize_gee()
-
-    geometry = polygon_to_ee_geometry(polygon)
+    if initialize:
+        initialize_gee()
 
     # 1. Imagem de satélite composta + pré-processamento + features
     collection = search_images(
@@ -133,9 +136,9 @@ def run(
 
     image_data, meta = download_array(feature_img, geometry, scale)
 
-    # 2. Ground truth MapBiomas reclassificado (0-4)
+    # 2. Ground truth MapBiomas reclassificado (0-5; 255 = ignorar)
     gt_raw = get_mapbiomas_layer(year=year, geometry=geometry)
-    gt_reclass = reclassify_mapbiomas(gt_raw)
+    gt_reclass = reclassify_mapbiomas(gt_raw).unmask(IGNORE_LABEL)
     labels_data, _ = download_array(gt_reclass, geometry, scale)
     labels_data = labels_data[0].astype(np.int64)  # (H, W)
 
@@ -159,7 +162,7 @@ def run(
 
     image_path = os.path.join(out_dir, image_name)
     labels_path = os.path.join(out_dir, labels_name)
-    meta_path = os.path.join(out_dir, "meta.json")
+    meta_path = os.path.join(out_dir, meta_name)
 
     np.save(image_path, image_hwc)
     np.save(labels_path, labels_data)
@@ -167,6 +170,8 @@ def run(
     meta_payload = {
         "satellite": satellite,
         "bands": band_names,
+        "classes": CLASS_NAMES,
+        "ignore_label": IGNORE_LABEL,
         "image_shape": list(image_hwc.shape),
         "labels_shape": list(labels_data.shape),
         "transform": str(meta["transform"]),
@@ -192,10 +197,18 @@ def main():
     parser = argparse.ArgumentParser(
         description="Baixa imagem + ground truth completos para a U-Net"
     )
-    parser.add_argument("--out", default="data/processed")
-    parser.add_argument("--satellite", default="sentinel2", choices=["sentinel2", "landsat8"])
-    parser.add_argument("--start", default="2024-01-01")
-    parser.add_argument("--end", default="2024-06-30")
+    parser.add_argument("--out", default=None)
+    parser.add_argument(
+        "--regions",
+        nargs="+",
+        default=None,
+        help="Nomes de biomas brasileiros (ex.: amazonia cerrado) ou 'all'",
+    )
+    parser.add_argument(
+        "--satellite", default="sentinel2", choices=["sentinel2", "landsat8"]
+    )
+    parser.add_argument("--start", default="2023-01-01")
+    parser.add_argument("--end", default="2023-12-31")
     parser.add_argument("--max-cloud", type=int, default=20)
     parser.add_argument("--scale", type=int, default=10)
     parser.add_argument("--year", type=int, default=2023)
@@ -203,18 +216,41 @@ def main():
     parser.add_argument("--labels-name", default="unet_labels.npy")
     args = parser.parse_args()
 
-    run(
-        polygon=DEFAULT_POLYGON,
-        start_date=args.start,
-        end_date=args.end,
-        satellite=args.satellite,
-        max_cloud_pct=args.max_cloud,
-        scale=args.scale,
-        year=args.year,
-        out_dir=args.out,
-        image_name=args.image_name,
-        labels_name=args.labels_name,
-    )
+    initialize_gee()
+
+    if args.regions:
+        regions = resolve_unet_regions(args.regions)
+        out_dir = args.out or "data/processed/unet"
+        for region in regions:
+            print(f"\n=== Bioma {region.name} ({region.biome}) ===")
+            run(
+                geometry=region.to_ee_geometry(),
+                start_date=args.start,
+                end_date=args.end,
+                satellite=args.satellite,
+                max_cloud_pct=args.max_cloud,
+                scale=args.scale,
+                year=args.year,
+                out_dir=out_dir,
+                image_name=f"{region.name}_image.npy",
+                labels_name=f"{region.name}_labels.npy",
+                meta_name=f"{region.name}_meta.json",
+                initialize=False,
+            )
+    else:
+        run(
+            geometry=polygon_to_ee_geometry(DEFAULT_POLYGON),
+            start_date=args.start,
+            end_date=args.end,
+            satellite=args.satellite,
+            max_cloud_pct=args.max_cloud,
+            scale=args.scale,
+            year=args.year,
+            out_dir=args.out or "data/processed",
+            image_name=args.image_name,
+            labels_name=args.labels_name,
+            initialize=False,
+        )
 
 
 if __name__ == "__main__":

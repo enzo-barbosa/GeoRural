@@ -1,23 +1,29 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { MapPin, AlertCircle, CheckCircle, Loader2, AlertTriangle, Satellite } from 'lucide-react'
+import {
+  MapPin,
+  AlertCircle,
+  CheckCircle,
+  Loader2,
+  AlertTriangle,
+  Satellite,
+  Globe2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Select, type SelectOption } from '@/components/ui/select'
 import { MapView } from '@/components/map/MapView'
 import { useClassify, useModelsStatus } from '@/hooks/useApi'
-import type { ClassifyRequest } from '@/types/api'
-
-const SATELLITE_OPTIONS = [
-  { value: 'sentinel2', label: 'Sentinel-2 (10m)' },
-  { value: 'landsat8', label: 'Landsat 8 (30m)' },
-] as const
+import { classifyApi } from '@/services/api'
+import type { ClassifierName, ClassifyRequest } from '@/types/api'
 
 const CLASSIFIER_OPTIONS = [
-  { value: 'random_forest', label: 'Random Forest' },
-  { value: 'svm', label: 'SVM' },
-  { value: 'unet_cnn', label: 'U-Net CNN' },
+  { value: 'auto', label: 'Automático (recomendado)' },
+  { value: 'ensemble', label: 'Ensemble (RF + SVM + U-Net)' },
+  { value: 'random_forest', label: 'Random Forest (domínio)' },
+  { value: 'svm', label: 'SVM (domínio)' },
+  { value: 'unet_cnn', label: 'U-Net (Brasil, Sentinel-2)' },
 ] as const
 
 const CLASS_LEGEND = [
@@ -26,13 +32,15 @@ const CLASS_LEGEND = [
   { name: 'Agricultura', color: '#2ecc71' },
   { name: 'Solo Exposto', color: '#f39c12' },
   { name: 'Área Construída', color: '#e74c3c' },
+  { name: 'Água', color: '#2e86de' },
 ] as const
 
 export function Classify() {
   const navigate = useNavigate()
   const [polygon, setPolygon] = useState<number[][][] | null>(null)
   const [satellite, setSatellite] = useState<'sentinel2' | 'landsat8'>('sentinel2')
-  const [classifier, setClassifier] = useState<'random_forest' | 'svm' | 'unet_cnn'>('random_forest')
+  const [classifier, setClassifier] = useState<ClassifierName>('auto')
+  const [coverage, setCoverage] = useState<'brazil' | 'global' | null>(null)
   const [startDate, setStartDate] = useState('2023-01-01')
   const [endDate, setEndDate] = useState('2023-12-31')
   const [maxCloud, setMaxCloud] = useState(80)
@@ -43,27 +51,36 @@ export function Classify() {
   const { data: modelsStatus } = useModelsStatus()
   const classifyMutation = useClassify()
 
-  const handlePolygonDraw = useCallback((coordinates: number[][][]) => {
+  const handlePolygonDraw = useCallback(async (coordinates: number[][][]) => {
     setPolygon(coordinates)
+    setCoverage(null)
     setError(null)
+
+    try {
+      const result = await classifyApi.getCoverage({
+        polygon: { type: 'Polygon', coordinates },
+      })
+      setCoverage(result.coverage)
+      if (result.coverage === 'global') {
+        setIncludeCrop(false)
+      }
+    } catch {
+      // A cobertura é apenas informativa; a classificação continua disponível.
+    }
   }, [])
 
   const handlePolygonRemove = useCallback(() => {
     setPolygon(null)
+    setCoverage(null)
+    setIncludeCrop(true)
   }, [])
 
-  const getModelStatus = (name: string) => {
-    switch (name) {
-      case 'random_forest':
-        return modelsStatus?.random_forest
-      case 'svm':
-        return modelsStatus?.svm
-      case 'unet_cnn':
-        return modelsStatus?.unet_cnn
-      default:
-        return false
-    }
-  }
+  const hasModels =
+    modelsStatus?.brazil_rf ||
+    modelsStatus?.brazil_svm ||
+    modelsStatus?.brazil_unet ||
+    modelsStatus?.global_rf ||
+    modelsStatus?.global_svm
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -82,7 +99,7 @@ export function Classify() {
       end_date: endDate,
       max_cloud: maxCloud,
       include_topography: includeTopography,
-      include_crop: includeCrop,
+      include_crop: coverage === 'global' ? false : includeCrop,
     }
 
     try {
@@ -99,8 +116,6 @@ export function Classify() {
       setError(err instanceof Error ? err.message : 'Erro ao classificar')
     }
   }
-
-  const isModelTrained = getModelStatus(classifier)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -160,6 +175,16 @@ export function Classify() {
                     <span>Desenhe uma área no mapa usando a ferramenta de polígono</span>
                   </div>
                 )}
+                {coverage && (
+                  <div className="mt-3 flex items-center gap-2 text-sm text-blue-700 bg-blue-50 p-3 rounded-lg">
+                    <Globe2 className="h-4 w-4" />
+                    <span>
+                      Cobertura: {coverage === 'brazil'
+                        ? 'Brasil (MapBiomas, detalhado)'
+                        : 'Global (ESA WorldCover)'}
+                    </span>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -188,28 +213,51 @@ export function Classify() {
                     />
                   </div>
 
-<div>
-                    <Label htmlFor="classifier">Classificador</Label>
-                    <Select
-                      value={classifier}
-                      onValueChange={(v: string) => setClassifier(v as 'random_forest' | 'svm' | 'unet_cnn')}
-                      options={CLASSIFIER_OPTIONS.map(opt => {
-                        const trained = getModelStatus(opt.value)
-                        return {
-                          value: opt.value,
-                          label: trained ? opt.label : `${opt.label} (não treinado)`,
-                          disabled: !trained,
+                  <details className="rounded-lg border border-gray-200 p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                      Avançado — escolher modelo
+                    </summary>
+                    <p className="mt-1 text-xs text-gray-500">
+                      O padrão escolhe automaticamente o especialista do Brasil
+                      ou a base global.
+                    </p>
+                    <div className="mt-3">
+                      <Label htmlFor="classifier">Classificador</Label>
+                      <Select
+                        value={classifier}
+                        onValueChange={(v: string) =>
+                          setClassifier(v as ClassifierName)
                         }
-                      })}
-                      placeholder="Selecione o classificador"
-                      className="mt-2"
-                    />
-                    {!isModelTrained && (
-                      <p className="mt-1 text-sm text-yellow-600">
-                        ⚠️ Modelo não treinado. Treine antes de classificar.
+                        options={CLASSIFIER_OPTIONS.map((opt) => {
+                          const unetDisabled =
+                            opt.value === 'unet_cnn' &&
+                            (!modelsStatus?.brazil_unet ||
+                              satellite !== 'sentinel2')
+                          return {
+                            value: opt.value,
+                            label: unetDisabled
+                              ? `${opt.label} (indisponível)`
+                              : opt.label,
+                            disabled: unetDisabled,
+                          }
+                        })}
+                        placeholder="Selecione o classificador"
+                        className="mt-2"
+                      />
+                    </div>
+                    {!hasModels && (
+                      <p className="mt-2 text-sm text-yellow-600">
+                        Nenhum modelo treinado encontrado. Treine antes de
+                        classificar.
                       </p>
                     )}
-                  </div>
+                    {coverage === 'global' && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Fora do Brasil não há tipo de cultivo nem U-Net; usa-se
+                        RF/SVM globais.
+                      </p>
+                    )}
+                  </details>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -259,15 +307,27 @@ export function Classify() {
                       />
                       Análise topográfica (elevação, declividade)
                     </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <label
+                      className={`flex items-center gap-2 text-sm ${
+                        coverage === 'global'
+                          ? 'text-gray-400'
+                          : 'text-gray-700'
+                      }`}
+                    >
                       <input
                         type="checkbox"
-                        checked={includeCrop}
+                        checked={includeCrop && coverage !== 'global'}
                         onChange={(e) => setIncludeCrop(e.target.checked)}
+                        disabled={coverage === 'global'}
                         className="h-4 w-4 accent-primary"
                       />
                       Tipo de cultivo (série NDVI/EVI)
                     </label>
+                    {coverage === 'global' && (
+                      <p className="text-xs text-gray-500">
+                        Disponível apenas para áreas no Brasil.
+                      </p>
+                    )}
                   </div>
 
                   <div className="border-t pt-6">
@@ -308,8 +368,4 @@ export function Classify() {
       </main>
     </div>
   )
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ')
 }

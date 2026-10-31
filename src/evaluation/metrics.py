@@ -9,13 +9,7 @@ from sklearn.metrics import (
     recall_score,
 )
 
-CLASS_NAMES = [
-    "Vegetação Nativa",
-    "Pastagem",
-    "Agricultura",
-    "Solo Exposto",
-    "Área Construída",
-]
+from src.config import CLASS_NAMES
 
 
 def overall_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -28,19 +22,37 @@ def overall_accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 def precision_per_class(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     """Calcula a Precisão para cada classe."""
-    precisions = precision_score(y_true, y_pred, average=None, zero_division=0)
+    precisions = precision_score(
+        y_true,
+        y_pred,
+        labels=list(range(len(CLASS_NAMES))),
+        average=None,
+        zero_division=0,
+    )
     return {name: float(p) for name, p in zip(CLASS_NAMES, precisions)}
 
 
 def recall_per_class(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     """Calcula o Recall para cada classe."""
-    recalls = recall_score(y_true, y_pred, average=None, zero_division=0)
+    recalls = recall_score(
+        y_true,
+        y_pred,
+        labels=list(range(len(CLASS_NAMES))),
+        average=None,
+        zero_division=0,
+    )
     return {name: float(r) for name, r in zip(CLASS_NAMES, recalls)}
 
 
 def f1_per_class(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     """Calcula o F1-Score para cada classe."""
-    f1s = f1_score(y_true, y_pred, average=None, zero_division=0)
+    f1s = f1_score(
+        y_true,
+        y_pred,
+        labels=list(range(len(CLASS_NAMES))),
+        average=None,
+        zero_division=0,
+    )
     return {name: float(f) for name, f in zip(CLASS_NAMES, f1s)}
 
 
