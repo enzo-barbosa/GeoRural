@@ -5,9 +5,17 @@ import os
 
 import numpy as np
 import torch
+from sklearn.metrics import confusion_matrix
 from torch import nn, optim
+from torch.utils.data import (
+    DataLoader,
+    Dataset,
+    TensorDataset,
+    WeightedRandomSampler,
+)
 
-from src.config import IGNORE_LABEL, NUM_CLASSES
+from src.config import CLASS_NAMES, IGNORE_LABEL, NUM_CLASSES
+from src.processing.local_features import add_local_indices_array
 
 
 class DoubleConv(nn.Module):
@@ -190,6 +198,7 @@ def spatial_patch_split(
     stride: int = 32,
     tiles: int = 3,
     val_tiles: int = 1,
+    include_indices: bool = False,
 ):
     """Separa patches em treino/validação por faixas espaciais disjuntas.
 
@@ -208,6 +217,8 @@ def spatial_patch_split(
     Returns:
         Tupla (X_train, y_train, X_val, y_val).
     """
+    if include_indices:
+        image = add_local_indices_array(image)
     height, width = image.shape[:2]
     ys = list(range(0, height - patch_size + 1, stride))
     xs = list(range(0, width - patch_size + 1, stride))
@@ -260,6 +271,7 @@ def leave_one_tile_out(
     val_tile: str,
     patch_size: int = 64,
     stride: int = 32,
+    include_indices: bool = False,
 ):
     """Monta patches de treino/validação deixando um tile inteiro de fora."""
     if val_tile not in tiles:
@@ -267,6 +279,8 @@ def leave_one_tile_out(
 
     train_img, train_lbl, val_img, val_lbl = [], [], [], []
     for name, (image, labels) in tiles.items():
+        if include_indices:
+            image = add_local_indices_array(image)
         patches_img, patches_lbl = prepare_patches(
             image, labels, patch_size=patch_size, stride=stride
         )
@@ -283,6 +297,152 @@ def leave_one_tile_out(
         np.concatenate(val_img, axis=0),
         np.concatenate(val_lbl, axis=0),
     )
+
+
+class PatchDataset(Dataset):
+    """Dataset de patches sob demanda (evita materializar 20 mil patches)."""
+
+    def __init__(
+        self,
+        tiles: dict[str, tuple[np.ndarray, np.ndarray]],
+        val_tile: str,
+        split: str = "train",
+        patch_size: int = 64,
+        stride: int = 32,
+        include_indices: bool = True,
+        min_valid_fraction: float = 0.01,
+        min_classes: int = 2,
+    ):
+        if val_tile not in tiles:
+            raise KeyError(f"Tile de validação desconhecido: {val_tile}")
+
+        self.tiles = tiles
+        self.patch_size = patch_size
+        self.include_indices = include_indices
+        self.samples: list[tuple[str, int, int]] = []
+
+        for name, (image, labels) in tiles.items():
+            is_val = name == val_tile
+            if (split == "val") != is_val:
+                continue
+
+            valid_labels = labels[
+                (labels >= 0) & (labels < NUM_CLASSES)
+            ]
+            fraction = (
+                float(valid_labels.size / labels.size) if labels.size else 0.0
+            )
+            classes = np.unique(valid_labels)
+            if fraction < min_valid_fraction or len(classes) < min_classes:
+                if is_val:
+                    raise ValueError(
+                        f"Tile de validação inválido: {name} "
+                        f"(fração={fraction:.3f}, "
+                        f"classes={classes.tolist()})."
+                    )
+                print(
+                    f"[skip] {name}: fração válida={fraction:.3f}, "
+                    f"classes={classes.tolist()}"
+                )
+                continue
+
+            height, width = image.shape[:2]
+            for y in range(0, height - patch_size + 1, stride):
+                for x in range(0, width - patch_size + 1, stride):
+                    self.samples.append((name, y, x))
+
+        if not self.samples:
+            raise ValueError(f"Split '{split}' sem patches.")
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, index: int):
+        name, y, x = self.samples[index]
+        image, labels = self.tiles[name]
+        patch = image[
+            y : y + self.patch_size, x : x + self.patch_size
+        ]
+        if self.include_indices:
+            patch = add_local_indices_array(patch)
+        label = labels[y : y + self.patch_size, x : x + self.patch_size]
+        return (
+            torch.from_numpy(np.ascontiguousarray(patch.transpose(2, 0, 1))).float(),
+            torch.from_numpy(label.astype(np.int64)),
+        )
+
+    def class_weights(self, ignore_index: int = IGNORE_LABEL) -> np.ndarray:
+        """Pesos inversos à frequência para CrossEntropyLoss."""
+        counts = np.zeros(NUM_CLASSES, dtype=np.float64)
+        for name, _y, _x in self.samples:
+            _, labels = self.tiles[name]
+            patch = labels[
+                _y : _y + self.patch_size, _x : _x + self.patch_size
+            ]
+            valid = patch != ignore_index
+            counts += np.bincount(
+                patch[valid].astype(int).ravel(), minlength=NUM_CLASSES
+            )[:NUM_CLASSES]
+        counts[counts == 0] = 1.0
+        return counts.sum() / (counts * len(counts))
+
+    def sample_weights(self, ignore_index: int = IGNORE_LABEL) -> np.ndarray:
+        """Peso por patch para WeightedRandomSampler."""
+        counts = np.zeros(NUM_CLASSES, dtype=np.float64)
+        for name, _y, _x in self.samples:
+            _, labels = self.tiles[name]
+            patch = labels[
+                _y : _y + self.patch_size, _x : _x + self.patch_size
+            ]
+            valid = patch != ignore_index
+            counts += np.bincount(
+                patch[valid].astype(int).ravel(), minlength=NUM_CLASSES
+            )[:NUM_CLASSES]
+        inverse = 1.0 / (counts + 1.0)
+
+        weights = np.ones(len(self.samples), dtype=np.float64)
+        for index, (name, _y, _x) in enumerate(self.samples):
+            _, labels = self.tiles[name]
+            patch = labels[
+                _y : _y + self.patch_size, _x : _x + self.patch_size
+            ]
+            valid = patch != ignore_index
+            if valid.any():
+                weights[index] = float(inverse[patch[valid]].mean())
+        return weights
+
+
+def make_patch_datasets(
+    tiles: dict[str, tuple[np.ndarray, np.ndarray]],
+    val_tile: str,
+    patch_size: int = 64,
+    stride: int = 32,
+    include_indices: bool = True,
+    min_valid_fraction: float = 0.01,
+    min_classes: int = 2,
+) -> tuple[PatchDataset, PatchDataset]:
+    """Cria datasets de treino/validação sem carregar todos os patches."""
+    train = PatchDataset(
+        tiles,
+        val_tile,
+        split="train",
+        patch_size=patch_size,
+        stride=stride,
+        include_indices=include_indices,
+        min_valid_fraction=min_valid_fraction,
+        min_classes=min_classes,
+    )
+    val = PatchDataset(
+        tiles,
+        val_tile,
+        split="val",
+        patch_size=patch_size,
+        stride=stride,
+        include_indices=include_indices,
+        min_valid_fraction=min_valid_fraction,
+        min_classes=min_classes,
+    )
+    return train, val
 
 
 def compile_model(
@@ -323,34 +483,134 @@ def compile_model(
     return model, optimizer, criterion
 
 
+def _sample_weights(
+    labels: np.ndarray, num_classes: int = NUM_CLASSES, ignore_index: int = IGNORE_LABEL
+) -> np.ndarray:
+    """Peso por patch para amostragem balanceada de classes raras."""
+    valid = labels != ignore_index
+    counts = np.bincount(
+        labels[valid].astype(int).ravel(), minlength=num_classes
+    )[:num_classes].astype(float)
+    inverse = 1.0 / (counts + 1.0)
+
+    weights = np.ones(len(labels), dtype=np.float64)
+    for index, label in enumerate(labels):
+        mask = label != ignore_index
+        if mask.any():
+            weights[index] = float(inverse[label[mask]].mean())
+    return weights
+
+
+def augment_batch(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Augmentation espacial e espectral para patches de satélite.
+
+    Args:
+        x: Tensor (B, C, H, W)
+        y: Tensor (B, H, W)
+    """
+    horizontal = torch.rand(len(x), device=x.device) < 0.5
+    if horizontal.any():
+        x[horizontal] = torch.flip(x[horizontal], dims=[3])
+        y[horizontal] = torch.flip(y[horizontal], dims=[2])
+
+    vertical = torch.rand(len(x), device=x.device) < 0.5
+    if vertical.any():
+        x[vertical] = torch.flip(x[vertical], dims=[2])
+        y[vertical] = torch.flip(y[vertical], dims=[1])
+
+    k = int(torch.randint(0, 4, (1,), device=x.device).item())
+    if k:
+        x = torch.rot90(x, k, dims=[2, 3])
+        y = torch.rot90(y, k, dims=[1, 2])
+
+    scale = 1.0 + (torch.rand((1, x.shape[1], 1, 1), device=x.device) - 0.5) * 0.1
+    noise = torch.randn_like(x) * 0.01
+    x = x * scale + noise
+
+    return x, y
+
+
+def segmentation_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    num_classes: int = NUM_CLASSES,
+    ignore_index: int = IGNORE_LABEL,
+) -> dict:
+    """Calcula IoU/F1 por classe e acurácia pixel a pixel."""
+    y_true = np.asarray(y_true).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+    valid = y_true != ignore_index
+    y_true = y_true[valid]
+    y_pred = y_pred[valid]
+
+    labels = list(range(num_classes))
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    tp = np.diag(cm).astype(float)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+    denom_iou = np.maximum(tp + fp + fn, 1.0)
+    denom_f1 = np.maximum(2 * tp + fp + fn, 1.0)
+    iou = tp / denom_iou
+    f1 = 2 * tp / denom_f1
+
+    accuracy = float(tp.sum() / max(cm.sum(), 1))
+    present = (tp + fn) > 0
+    return {
+        "accuracy": accuracy,
+        "miou": float(np.mean(iou[present])) if present.any() else 0.0,
+        "macro_f1": float(np.mean(f1[present])) if present.any() else 0.0,
+        "iou": {
+            name: round(float(value), 4)
+            for name, value in zip(CLASS_NAMES[:num_classes], iou)
+        },
+        "f1": {
+            name: round(float(value), 4)
+            for name, value in zip(CLASS_NAMES[:num_classes], f1)
+        },
+        "confusion_matrix": cm.tolist(),
+    }
+
+
 def train_unet(
     model: nn.Module,
-    X_train: np.ndarray,
-    y_train: np.ndarray,
-    X_val: np.ndarray,
-    y_val: np.ndarray,
+    X_train: np.ndarray | Dataset,
+    y_train: np.ndarray | None,
+    X_val: np.ndarray | Dataset,
+    y_val: np.ndarray | None,
     epochs: int = 100,
     batch_size: int = 16,
     learning_rate: float = 0.001,
     save_path: str = "models/unet_model.pth",
     class_weights: np.ndarray | None = None,
     ignore_index: int = IGNORE_LABEL,
+    augment: bool = False,
+    balance: bool = False,
+    patience: int = 0,
+    checkpoint_path: str | None = None,
+    resume: bool = False,
+    checkpoint_every: int = 5,
 ):
-    """Treina o modelo U-Net.
+    """Treina a U-Net com augmentation, balanceamento e checkpoint.
 
     Args:
-        model: Modelo U-Net
-        X_train: Patches de treinamento (n_samples, height, width, channels)
-        y_train: Rótulos de treinamento (n_samples, height, width)
-        X_val: Patches de validação
-        y_val: Rótulos de validação
-        epochs: Número de épocas (default: 100)
-        batch_size: Tamanho do batch (default: 16)
-        learning_rate: Taxa de aprendizado (default: 0.001)
-        save_path: Caminho para salvar o melhor modelo
+        model: Modelo U-Net.
+        X_train/y_train: Patches de treino (n, H, W, C) e rótulos (n, H, W),
+            ou um ``PatchDataset`` para carregar patches sob demanda.
+        X_val/y_val: Patches de validação (ou ``PatchDataset``).
+        epochs: Número de épocas.
+        batch_size: Tamanho do batch.
+        learning_rate: Taxa de aprendizado.
+        save_path: Caminho do melhor modelo (state_dict).
+        class_weights: Pesos por classe.
+        ignore_index: Label ignorado (255).
+        augment: Aplica flip/rot90/jitter no treino.
+        balance: Usa WeightedRandomSampler para classes raras.
+        patience: Épocas sem melhora para early stopping (0 = desliga).
+        checkpoint_path: Caminho do checkpoint "last" (retomada).
+        resume: Retoma do checkpoint se existir.
 
     Returns:
-        Histórico de treinamento
+        Histórico com perdas, acurácias e métricas finais (IoU/F1).
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, optimizer, criterion = compile_model(
@@ -361,25 +621,68 @@ def train_unet(
         ignore_index=ignore_index,
     )
 
-    # Converter numpy arrays para tensors PyTorch
-    X_train = torch.FloatTensor(X_train).permute(0, 3, 1, 2)
-    y_train = torch.LongTensor(y_train)
-    X_val = torch.FloatTensor(X_val).permute(0, 3, 1, 2)
-    y_val = torch.LongTensor(y_val)
+    if isinstance(X_train, Dataset):
+        train_dataset = X_train
+        val_dataset = X_val
+    else:
+        X_train = torch.FloatTensor(X_train).permute(0, 3, 1, 2)
+        y_train = torch.LongTensor(y_train)
+        X_val = torch.FloatTensor(X_val).permute(0, 3, 1, 2)
+        y_val = torch.LongTensor(y_val)
+        train_dataset = TensorDataset(X_train, y_train)
+        val_dataset = TensorDataset(X_val, y_val)
 
-    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
-    val_dataset = torch.utils.data.TensorDataset(X_val, y_val)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True
-    )
-    val_loader = torch.utils.data.DataLoader(
+    if balance:
+        if isinstance(train_dataset, PatchDataset):
+            weights = train_dataset.sample_weights(ignore_index)
+        else:
+            weights = _sample_weights(
+                y_train.numpy(), NUM_CLASSES, ignore_index
+            )
+        sampler = WeightedRandomSampler(
+            torch.DoubleTensor(weights),
+            num_samples=len(weights),
+            replacement=True,
+        )
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, sampler=sampler
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True
+        )
+
+    val_loader = DataLoader(
         val_dataset, batch_size=batch_size, shuffle=False
     )
 
-    history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "train_acc": [],
+        "val_acc": [],
+    }
     best_val_loss = float("inf")
+    start_epoch = 0
 
-    for epoch in range(epochs):
+    if checkpoint_path is None:
+        checkpoint_path = save_path.replace(".pth", "_last.pth")
+
+    if resume and os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        if isinstance(checkpoint, dict) and "model" in checkpoint:
+            model.load_state_dict(checkpoint["model"])
+            optimizer.load_state_dict(checkpoint["optimizer"])
+            start_epoch = int(checkpoint.get("epoch", 0))
+            history = checkpoint.get("history", history)
+            best_val_loss = float(
+                checkpoint.get("best_val_loss", best_val_loss)
+            )
+            print(f"Retomando do checkpoint {checkpoint_path} (época {start_epoch})")
+
+    epochs_without_improvement = 0
+
+    for epoch in range(start_epoch, epochs):
         model.train()
         train_loss = 0.0
         train_correct = 0
@@ -387,6 +690,8 @@ def train_unet(
 
         for batch_x, batch_y in train_loader:
             batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+            if augment:
+                batch_x, batch_y = augment_batch(batch_x, batch_y)
 
             optimizer.zero_grad()
             outputs = model(batch_x)
@@ -438,15 +743,63 @@ def train_unet(
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            epochs_without_improvement = 0
             os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
             torch.save(model.state_dict(), save_path)
+        else:
+            epochs_without_improvement += 1
 
-        if (epoch + 1) % 10 == 0:
+        should_checkpoint = checkpoint_path and (
+            (epoch + 1) % max(checkpoint_every, 1) == 0
+            or epoch + 1 == epochs
+        )
+        if should_checkpoint:
+            os.makedirs(
+                os.path.dirname(checkpoint_path) or ".", exist_ok=True
+            )
+            torch.save(
+                {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "epoch": epoch + 1,
+                    "history": history,
+                    "best_val_loss": best_val_loss,
+                },
+                checkpoint_path,
+            )
+
+        if (epoch + 1) % 5 == 0 or epoch == start_epoch:
             print(f"Época {epoch + 1}/{epochs}")
             print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
             print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
+        if patience and epochs_without_improvement >= patience:
+            print(f"Early stopping na época {epoch + 1}.")
+            break
+
+    if os.path.exists(save_path):
+        model.load_state_dict(torch.load(save_path, map_location=device))
+
+    model.eval()
+    y_true, y_pred = [], []
+    with torch.no_grad():
+        for batch_x, batch_y in val_loader:
+            batch_x = batch_x.to(device)
+            outputs = model(batch_x)
+            predicted = torch.argmax(outputs, dim=1).cpu().numpy()
+            y_pred.append(predicted)
+            y_true.append(batch_y.numpy())
+
+    metrics = segmentation_metrics(
+        np.concatenate(y_true, axis=0),
+        np.concatenate(y_pred, axis=0),
+        num_classes=NUM_CLASSES,
+        ignore_index=ignore_index,
+    )
+    history["metrics"] = metrics
+
     print(f"Treinamento concluído! Melhor modelo salvo em: {save_path}")
+    print(f"  Acurácia: {metrics['accuracy']:.4f} | mIoU: {metrics['miou']:.4f}")
     return history
 
 
@@ -464,7 +817,10 @@ def load_model(model: nn.Module, filepath: str, device: str | None = None):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model.load_state_dict(torch.load(filepath, map_location=device))
+    state = torch.load(filepath, map_location=device)
+    if isinstance(state, dict) and "model" in state:
+        state = state["model"]
+    model.load_state_dict(state)
     model.to(device)
     model.eval()
     return model

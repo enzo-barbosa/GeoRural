@@ -22,8 +22,9 @@ from src.evaluation.spatial_split import (
     assign_spatial_blocks,
     spatial_kfold_indices,
 )
+from src.processing.local_features import LOCAL_INDEX_NAMES, add_local_indices
 
-FEATURE_COLUMNS = (
+BASE_FEATURE_COLUMNS = (
     "B2",
     "B3",
     "B4",
@@ -34,14 +35,38 @@ FEATURE_COLUMNS = (
     "contrast",
     "dissimilarity",
 )
+FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + tuple(LOCAL_INDEX_NAMES)
 SVM_MAX_SAMPLES = 20_000
 
 
-def load_domain_samples(path: str):
-    """Carrega CSV e devolve (df, features, X, y, groups)."""
+def load_domain_samples(
+    path: str,
+    filter_regions: list[str] | None = None,
+    group_strategy: str = "auto",
+    include_indices: bool = True,
+):
+    """Carrega CSV e devolve (df, features, X, y, groups).
+
+    Args:
+        path: CSV de amostras.
+        filter_regions: mantém apenas estes ``region_id`` (ex.: polos de SP).
+        group_strategy: ``auto`` (bioma/região), ``block`` (blocos espaciais),
+            ``region`` ou ``biome``.
+    """
     df = pd.read_csv(path)
-    feature_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
-    if len(feature_cols) != len(FEATURE_COLUMNS):
+    if filter_regions:
+        if "region_id" not in df.columns:
+            raise ValueError("filter_regions exige a coluna region_id.")
+        df = df[df["region_id"].isin(filter_regions)].reset_index(drop=True)
+
+    if include_indices:
+        df = add_local_indices(df)
+        expected_features = FEATURE_COLUMNS
+    else:
+        expected_features = BASE_FEATURE_COLUMNS
+
+    feature_cols = [c for c in expected_features if c in df.columns]
+    if len(feature_cols) != len(expected_features):
         raise ValueError(
             f"Features ausentes em {path}. Colunas: {df.columns.tolist()}"
         )
@@ -51,8 +76,25 @@ def load_domain_samples(path: str):
     X = df[feature_cols].to_numpy(dtype=np.float32)
     y = df["class_id"].to_numpy(dtype=np.int64)
 
-    if "biome" in df.columns and df["biome"].nunique() >= 2:
+    if group_strategy == "block" and {"longitude", "latitude"}.issubset(
+        df.columns
+    ):
+        groups = assign_spatial_blocks(
+            df["longitude"], df["latitude"], block_size=0.02
+        )
+    elif group_strategy == "region" and "region_id" in df.columns:
+        groups = pd.factorize(df["region_id"].astype(str))[0]
+    elif "biome" in df.columns and (
+        group_strategy == "biome"
+        or (group_strategy == "auto" and df["biome"].nunique() >= 2)
+    ):
         groups = pd.factorize(df["biome"].astype(str))[0]
+    elif (
+        group_strategy == "auto"
+        and "region_id" in df.columns
+        and df["region_id"].nunique() >= 2
+    ):
+        groups = pd.factorize(df["region_id"].astype(str))[0]
     elif {"longitude", "latitude"}.issubset(df.columns):
         groups = assign_spatial_blocks(df["longitude"], df["latitude"])
     else:
@@ -109,13 +151,23 @@ def _evaluate_one(
     groups: np.ndarray,
     n_splits: int,
     output_dir: str,
+    rf_n_trees: int = 300,
+    rf_max_depth: int = 25,
+    rf_min_samples_leaf: int = 1,
 ):
     splits = spatial_kfold_indices(groups, n_splits=n_splits)
     print(f"\n{name}: {len(splits)} folds, {len(np.unique(groups))} grupos")
 
     if name == "Random Forest":
         accs, kappas, oof_true, oof_pred = _evaluate_cv(
-            lambda a, b: train_random_forest(a, b, verbose=0),
+            lambda a, b: train_random_forest(
+                a,
+                b,
+                n_trees=rf_n_trees,
+                max_depth=rf_max_depth,
+                min_samples_leaf=rf_min_samples_leaf,
+                verbose=0,
+            ),
             predict_random_forest,
             splits,
             X,
@@ -159,9 +211,18 @@ def train_domain(
     svm_max_samples: int = SVM_MAX_SAMPLES,
     models_dir: str = "models",
     output_dir: str = "outputs",
+    rf_n_trees: int = 300,
+    rf_max_depth: int = 25,
+    rf_min_samples_leaf: int = 1,
+    filter_regions: list[str] | None = None,
+    group_strategy: str = "auto",
 ):
     """Treina RF/SVM de um domínio e salva modelos + métricas."""
-    _df, feature_cols, X, y, groups = load_domain_samples(csv_path)
+    _df, feature_cols, X, y, groups = load_domain_samples(
+        csv_path,
+        filter_regions=filter_regions,
+        group_strategy=group_strategy,
+    )
     print(f"Total de amostras: {len(X)}")
     print(f"Features ({len(feature_cols)}): {feature_cols}")
     print(f"Classes: {dict(pd.Series(y).value_counts().sort_index())}")
@@ -173,7 +234,15 @@ def train_domain(
     }
 
     metrics[f"{prefix}_rf"] = _evaluate_one(
-        "Random Forest", X, y, groups, n_splits, output_dir
+        "Random Forest",
+        X,
+        y,
+        groups,
+        n_splits,
+        output_dir,
+        rf_n_trees=rf_n_trees,
+        rf_max_depth=rf_max_depth,
+        rf_min_samples_leaf=rf_min_samples_leaf,
     )
 
     X_svm, y_svm, groups_svm = _cap_samples(
@@ -186,7 +255,14 @@ def train_domain(
 
     # Modelos finais
     print("\nTreinando modelos finais...")
-    final_rf = train_random_forest(X, y, verbose=0)
+    final_rf = train_random_forest(
+        X,
+        y,
+        n_trees=rf_n_trees,
+        max_depth=rf_max_depth,
+        min_samples_leaf=rf_min_samples_leaf,
+        verbose=0,
+    )
     final_svm = train_svm(
         X_svm, y_svm, verbose=False, probability=True
     )

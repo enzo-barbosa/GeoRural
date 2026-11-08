@@ -33,6 +33,11 @@ from src.gee.collector import get_composite_image, polygon_to_ee_geometry, searc
 from src.gee.ground_truth import get_mapbiomas_layer, reclassify_mapbiomas
 from src.gee.preprocessor import preprocess_image
 from src.gee.regions import resolve_unet_regions
+from src.processing.dataset_validation import (
+    analyze_tile,
+    sanitize_features,
+    sanitize_labels,
+)
 from src.processing.features import extract_features_ee, get_feature_bands
 
 DEFAULT_POLYGON = [
@@ -90,6 +95,7 @@ def download_array(ee_image: ee.Image, region: ee.Geometry, scale: int) -> np.nd
         arrays.append(chunk)
 
     data = np.concatenate(arrays, axis=0)
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
     return data, meta
 
 
@@ -105,6 +111,9 @@ def run(
     image_name,
     labels_name,
     meta_name: str = "meta.json",
+    min_valid_fraction: float = 0.01,
+    min_classes: int = 2,
+    keep_invalid: bool = False,
     initialize: bool = True,
 ):
     if initialize:
@@ -154,9 +163,27 @@ def run(
         image_data = image_data[:, :min_h, :min_w]
         labels_data = labels_data[:min_h, :min_w]
 
-    # Transpor imagem para (H, W, C)
+    # Transpor imagem para (H, W, C) e sanitizar
     image_chw = image_data.astype(np.float32)
     image_hwc = np.moveaxis(image_chw, 0, -1)
+    image_hwc = sanitize_features(image_hwc, band_names)
+    labels_data = sanitize_labels(labels_data)
+
+    report = analyze_tile(
+        image_hwc,
+        labels_data,
+        min_valid_fraction=min_valid_fraction,
+        min_classes=min_classes,
+    )
+    report["bands"] = band_names
+
+    if not report["valid"] and not keep_invalid:
+        print(
+            "  [inválido] "
+            f"fração válida={report['valid_fraction']:.3f} "
+            f"classes={report['classes']} — tile não será salvo."
+        )
+        return report
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -179,6 +206,7 @@ def run(
         "bounds": meta["bounds"],
         "year": year,
         "scale": scale,
+        "validation": report,
     }
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta_payload, f, indent=2, ensure_ascii=False)
@@ -192,6 +220,8 @@ def run(
     for cls_id, count in zip(unique, counts):
         print(f"  Classe {int(cls_id)}: {int(count)} pixels")
 
+    return report
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -203,6 +233,25 @@ def main():
         nargs="+",
         default=None,
         help="Nomes de biomas brasileiros (ex.: amazonia cerrado) ou 'all'",
+    )
+    parser.add_argument(
+        "--tiles-per-region",
+        type=int,
+        default=1,
+        help="Sub-tiles gerados ao redor de cada região (ex.: 4).",
+    )
+    parser.add_argument("--tile-size", type=float, default=0.08)
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Pula tiles cujos arrays já existem.",
+    )
+    parser.add_argument("--min-valid-fraction", type=float, default=0.01)
+    parser.add_argument("--min-classes", type=int, default=2)
+    parser.add_argument(
+        "--keep-invalid",
+        action="store_true",
+        help="Salva tiles inválidos (para diagnóstico).",
     )
     parser.add_argument(
         "--satellite", default="sentinel2", choices=["sentinel2", "landsat8"]
@@ -219,11 +268,35 @@ def main():
     initialize_gee()
 
     if args.regions:
-        regions = resolve_unet_regions(args.regions)
-        out_dir = args.out or "data/processed/unet"
+        regions = resolve_unet_regions(
+            args.regions,
+            tiles_per_region=args.tiles_per_region,
+            tile_size=args.tile_size,
+        )
+        default_out = (
+            "data/processed/unet_full"
+            if args.tiles_per_region > 1
+            else "data/processed/unet"
+        )
+        out_dir = args.out or default_out
+        reports = {}
         for region in regions:
+            image_path = os.path.join(out_dir, f"{region.name}_image.npy")
+            labels_path = os.path.join(out_dir, f"{region.name}_labels.npy")
+            if args.skip_existing and os.path.exists(image_path) and os.path.exists(
+                labels_path
+            ):
+                print(f"[skip] {region.name} (já existe)")
+                reports[region.name] = analyze_tile(
+                    np.load(image_path, mmap_mode="r"),
+                    np.load(labels_path),
+                    min_valid_fraction=args.min_valid_fraction,
+                    min_classes=args.min_classes,
+                )
+                continue
+
             print(f"\n=== Bioma {region.name} ({region.biome}) ===")
-            run(
+            reports[region.name] = run(
                 geometry=region.to_ee_geometry(),
                 start_date=args.start,
                 end_date=args.end,
@@ -235,8 +308,28 @@ def main():
                 image_name=f"{region.name}_image.npy",
                 labels_name=f"{region.name}_labels.npy",
                 meta_name=f"{region.name}_meta.json",
+                min_valid_fraction=args.min_valid_fraction,
+                min_classes=args.min_classes,
+                keep_invalid=args.keep_invalid,
                 initialize=False,
             )
+
+        report_path = os.path.join(out_dir, "dataset_report.json")
+        with open(report_path, "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "valid_tiles": [
+                        name
+                        for name, report in reports.items()
+                        if report and report.get("valid")
+                    ],
+                    "tiles": reports,
+                },
+                file,
+                indent=2,
+                ensure_ascii=False,
+            )
+        print(f"\nRelatório do dataset: {report_path}")
     else:
         run(
             geometry=polygon_to_ee_geometry(DEFAULT_POLYGON),

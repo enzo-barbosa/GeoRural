@@ -1,9 +1,6 @@
-"""Atalho para treinar os classificadores da base global.
+"""Atalho para treinar os classificadores da base global."""
 
-Equivalente a:
-    python notebooks/03-classifiers-test.py global
-"""
-
+import argparse
 import os
 import sys
 
@@ -14,18 +11,28 @@ from src.evaluation.training import train_domain
 
 
 def main():
-    csv_path = os.path.join(PROJECT_ROOT, "data/samples/global_samples.csv")
+    parser = argparse.ArgumentParser(description="Treina RF/SVM globais")
+    parser.add_argument("--csv", default=None)
+    parser.add_argument("--models-dir", default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--svm-max", type=int, default=20_000)
+    args = parser.parse_args()
+
+    csv_path = args.csv or os.path.join(
+        PROJECT_ROOT, "data/samples/global_samples.csv"
+    )
     if not os.path.exists(csv_path):
         raise FileNotFoundError(
-            "data/samples/global_samples.csv não encontrado. Rode:\n"
-            "  python src/gee/extract_samples_cli.py --domain global "
-            "--regions all --years 2021 --label-source worldcover"
+            f"{csv_path} não encontrado. Rode a extração global antes."
         )
 
-    print("=" * 60)
-    print("TREINO — GLOBAL (ESA WorldCover 2021)")
-    print("=" * 60)
-    train_domain(csv_path, prefix="global")
+    train_domain(
+        csv_path,
+        prefix="global",
+        svm_max_samples=args.svm_max,
+        models_dir=args.models_dir or os.path.join(PROJECT_ROOT, "models"),
+        output_dir=args.output_dir or os.path.join(PROJECT_ROOT, "outputs"),
+    )
 
 
 if __name__ == "__main__":

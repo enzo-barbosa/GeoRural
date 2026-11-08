@@ -24,6 +24,7 @@ const CLASSIFIER_OPTIONS = [
   { value: 'random_forest', label: 'Random Forest (domínio)' },
   { value: 'svm', label: 'SVM (domínio)' },
   { value: 'unet_cnn', label: 'U-Net (Brasil, Sentinel-2)' },
+  { value: 'sp_ensemble', label: 'Regional SP (experimental)' },
 ] as const
 
 const CLASS_LEGEND = [
@@ -46,6 +47,7 @@ export function Classify() {
   const [maxCloud, setMaxCloud] = useState(80)
   const [includeTopography, setIncludeTopography] = useState(true)
   const [includeCrop, setIncludeCrop] = useState(true)
+  const [postprocess, setPostprocess] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const { data: modelsStatus } = useModelsStatus()
@@ -80,7 +82,9 @@ export function Classify() {
     modelsStatus?.brazil_svm ||
     modelsStatus?.brazil_unet ||
     modelsStatus?.global_rf ||
-    modelsStatus?.global_svm
+    modelsStatus?.global_svm ||
+    modelsStatus?.sp_rf ||
+    modelsStatus?.sp_svm
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -100,6 +104,7 @@ export function Classify() {
       max_cloud: maxCloud,
       include_topography: includeTopography,
       include_crop: coverage === 'global' ? false : includeCrop,
+      postprocess,
     }
 
     try {
@@ -233,12 +238,16 @@ export function Classify() {
                             opt.value === 'unet_cnn' &&
                             (!modelsStatus?.brazil_unet ||
                               satellite !== 'sentinel2')
+                          const spDisabled =
+                            opt.value === 'sp_ensemble' &&
+                            !(modelsStatus?.sp_rf && modelsStatus?.sp_svm)
+                          const disabled = unetDisabled || spDisabled
                           return {
                             value: opt.value,
-                            label: unetDisabled
+                            label: disabled
                               ? `${opt.label} (indisponível)`
                               : opt.label,
-                            disabled: unetDisabled,
+                            disabled,
                           }
                         })}
                         placeholder="Selecione o classificador"
@@ -328,6 +337,18 @@ export function Classify() {
                         Disponível apenas para áreas no Brasil.
                       </p>
                     )}
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={postprocess}
+                        onChange={(e) => setPostprocess(e.target.checked)}
+                        className="h-4 w-4 accent-primary"
+                      />
+                      Suavizar classificação (maioria 3×3)
+                    </label>
+                    <p className="text-xs text-gray-500">
+                      Reduz ruído pixel a pixel e melhora a leitura visual.
+                    </p>
                   </div>
 
                   <div className="border-t pt-6">

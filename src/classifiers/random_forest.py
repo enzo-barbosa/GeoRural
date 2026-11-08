@@ -65,6 +65,7 @@ def train_random_forest(
     y_train: np.ndarray,
     n_trees: int = 200,
     max_depth: int = 15,
+    min_samples_leaf: int = 1,
     random_state: int = 42,
     verbose: int = 1,
 ):
@@ -87,6 +88,7 @@ def train_random_forest(
     model = RandomForestClassifier(
         n_estimators=n_trees,
         max_depth=max_depth,
+        min_samples_leaf=min_samples_leaf,
         random_state=random_state,
         n_jobs=-1,
         verbose=verbose,

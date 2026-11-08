@@ -143,6 +143,8 @@ export function Results() {
   const classAreas = result.class_areas ?? []
   const layers = result.layers ?? []
   const stats = result.stats ?? []
+  const reliefLayer = layers.find((layer) => layer.name === 'relief')
+  const slopeLayer = layers.find((layer) => layer.name === 'slope')
 
   const handleDownloadCSV = () => {
     const headers = ['Classe', 'Area (ha)', 'Pixels', 'Proporcao (%)', 'Talhoes']
@@ -221,6 +223,11 @@ export function Results() {
                       {result.models_used.join(' + ')}
                     </p>
                   )}
+                  {result.postprocessed && (
+                    <p className="text-xs text-gray-500">
+                      Pós-processado (maioria 3×3)
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -254,7 +261,8 @@ export function Results() {
                   <p className="font-semibold text-gray-900">{result.num_images}</p>
                   {result.confidence_mean != null && (
                     <p className="text-xs text-gray-500">
-                      Confiança média: {(result.confidence_mean * 100).toFixed(1)}%
+                      Confiança média (não calibrada):{' '}
+                      {(result.confidence_mean * 100).toFixed(1)}%
                     </p>
                   )}
                 </div>
@@ -499,6 +507,64 @@ export function Results() {
                   </p>
                 </div>
               </div>
+
+              <p className="text-xs text-gray-500 mb-4">
+                Fonte do DEM: <strong>{result.topography.dem_source ?? 'NASADEM'}</strong>
+                {result.topography.dem_resolution_m
+                  ? ` · resolução ~${result.topography.dem_resolution_m} m`
+                  : ''}
+              </p>
+
+              {(reliefLayer || slopeLayer) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">
+                      Mapa de Relevo
+                    </p>
+                    <img
+                      src={(reliefLayer ?? slopeLayer)!.image_url}
+                      alt="Mapa de relevo da área analisada"
+                      className="w-full max-h-[420px] object-contain rounded-lg border border-gray-200 bg-gray-50"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500 mb-2">
+                        {reliefLayer
+                          ? 'Hipsometria + sombreamento (hillshade)'
+                          : 'Classes de declividade'}
+                      </p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                        {(reliefLayer ?? slopeLayer)!.legend.map((item) => (
+                          <span key={item.label} className="flex items-center gap-1">
+                            <span
+                              className="inline-block w-3 h-3 rounded"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            {item.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          handleDownloadPNG(
+                            (reliefLayer ?? slopeLayer)!.image_url,
+                            `relevo_${result.job_id}.png`,
+                          )
+                        }
+                        className="gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        Baixar Mapa de Relevo
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <p className="text-sm text-gray-500 mb-2">

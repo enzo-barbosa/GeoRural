@@ -30,7 +30,7 @@ def calculate_ndvi(nir_band: np.ndarray, red_band: np.ndarray) -> np.ndarray:
 
     ndvi = (nir - red) / denominator
 
-    return ndvi
+    return np.clip(ndvi, -1.0, 1.0)
 
 
 def calculate_ndvi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image:
@@ -46,11 +46,11 @@ def calculate_ndvi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image
     if satellite == "sentinel2":
         ndvi = image.expression(
             "(b('B8') - b('B4')) / (b('B8') + b('B4'))"
-        ).rename("NDVI")
+        ).rename("NDVI").clamp(-1.0, 1.0)
     elif satellite == "landsat8":
         ndvi = image.expression(
             "(b('SR_B5') - b('SR_B4')) / (b('SR_B5') + b('SR_B4'))"
-        ).rename("NDVI")
+        ).rename("NDVI").clamp(-1.0, 1.0)
     else:
         raise ValueError(f"Satélite não suportado: {satellite}")
 
@@ -84,7 +84,7 @@ def calculate_evi(
 
     evi = 2.5 * (nir - red) / denominator
 
-    return evi
+    return np.clip(evi, -1.0, 1.0)
 
 
 def calculate_evi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image:
@@ -105,7 +105,7 @@ def calculate_evi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image:
                 "RED": image.select("B4"),
                 "BLUE": image.select("B2"),
             },
-        ).rename("EVI")
+        ).rename("EVI").clamp(-1.0, 1.0)
     elif satellite == "landsat8":
         evi = image.expression(
             "2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))",
@@ -114,7 +114,7 @@ def calculate_evi_ee(image: ee.Image, satellite: str = "sentinel2") -> ee.Image:
                 "RED": image.select("SR_B4"),
                 "BLUE": image.select("SR_B2"),
             },
-        ).rename("EVI")
+        ).rename("EVI").clamp(-1.0, 1.0)
     else:
         raise ValueError(f"Satélite não suportado: {satellite}")
 

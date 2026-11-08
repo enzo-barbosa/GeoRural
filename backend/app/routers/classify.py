@@ -43,6 +43,7 @@ async def classify_endpoint(
         max_cloud=request.max_cloud,
         include_topography=request.include_topography,
         include_crop=request.include_crop,
+        postprocess=request.postprocess,
     )
 
     if result["status"] == "failed":

@@ -1,4 +1,6 @@
-"""Análise topográfica com DEM NASADEM (SRTM 30m) via Google Earth Engine."""
+"""Análise topográfica com DEM (NASADEM/GLO-30) via Google Earth Engine."""
+
+import os
 
 import ee
 import numpy as np
@@ -32,10 +34,23 @@ SLOPE_CLASS_COLORS = [
 ]
 
 
-def get_dem(geometry: ee.Geometry) -> ee.Image:
-    """Retorna a elevação NASADEM recortada na área de interesse."""
-    dem = ee.Image("NASA/NASADEM_HGT/001").select("elevation")
+def get_dem(geometry: ee.Geometry, source: str | None = None) -> ee.Image:
+    """Retorna o DEM recortado na área de interesse.
+
+    ``GEORURAL_DEM_SOURCE=GLO30`` usa Copernicus GLO-30; o padrão é NASADEM.
+    """
+    source = (source or os.environ.get("GEORURAL_DEM_SOURCE", "NASADEM")).upper()
+    if source == "GLO30":
+        dem = ee.Image("COPERNICUS/DEM/GLO30").select("DEM")
+    else:
+        dem = ee.Image("NASA/NASADEM_HGT/001").select("elevation")
     return dem.clip(geometry)
+
+
+def dem_source_name(source: str | None = None) -> str:
+    """Nome legível da fonte do DEM."""
+    source = (source or os.environ.get("GEORURAL_DEM_SOURCE", "NASADEM")).upper()
+    return "Copernicus GLO-30" if source == "GLO30" else "NASADEM"
 
 
 def compute_terrain(dem: ee.Image) -> ee.Image:

@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+import torch
 from fastapi import HTTPException
 
 from backend.app.config import get_settings
@@ -11,7 +12,6 @@ from src.classifiers.random_forest import load_model as load_rf
 from src.classifiers.svm import load_model as load_svm
 from src.classifiers.unet_cnn import build_unet
 from src.classifiers.unet_cnn import load_model as load_unet
-from src.config import NUM_CLASSES
 from src.gee.auth import initialize_gee
 
 # Global flag for GEE initialization
@@ -23,6 +23,8 @@ MODEL_FILES = {
     "brazil_unet": "brazil_unet.pth",
     "global_rf": "global_rf.pkl",
     "global_svm": "global_svm.pkl",
+    "sp_rf": "sp_rf.pkl",
+    "sp_svm": "sp_svm.pkl",
     "crop": "crop_classifier.pkl",
 }
 
@@ -89,12 +91,19 @@ def get_cached_model(model_name: str):
             status_code=404, detail=f"Model {name} not found at {path}"
         )
 
-    if name in {"brazil_rf", "global_rf"}:
+    if name in {"brazil_rf", "global_rf", "sp_rf"}:
         return load_rf(str(path))
-    if name in {"brazil_svm", "global_svm"}:
+    if name in {"brazil_svm", "global_svm", "sp_svm"}:
         return load_svm(str(path))
     if name == "brazil_unet":
-        model = build_unet(input_shape=(64, 64, 9), num_classes=NUM_CLASSES)
+        state = torch.load(str(path), map_location="cpu")
+        if isinstance(state, dict) and "model" in state:
+            state = state["model"]
+        in_channels = int(state["inc.double_conv.0.weight"].shape[1])
+        out_channels = int(state["outc.conv.weight"].shape[0])
+        model = build_unet(
+            input_shape=(64, 64, in_channels), num_classes=out_channels
+        )
         return load_unet(model, str(path))
     if name == "crop":
         return load_crop(str(path))

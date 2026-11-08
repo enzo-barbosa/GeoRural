@@ -64,7 +64,11 @@ def run(args) -> None:
     manifest_path = os.path.join(
         "data/manifests", f"{args.task}_{args.domain}.json"
     )
-    manifest = load_manifest(manifest_path) if args.resume else {}
+    manifest = (
+        load_manifest(manifest_path)
+        if args.resume and not args.force
+        else {}
+    )
 
     completed_paths: list[str] = []
 
@@ -75,6 +79,7 @@ def run(args) -> None:
 
             if (
                 args.resume
+                and not args.force
                 and manifest.get(key, {}).get("status") == "completed"
                 and os.path.exists(partial_path)
             ):
@@ -218,6 +223,11 @@ def main() -> None:
     parser.add_argument("--combined-out", default=None)
     parser.add_argument("--no-legacy", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Refaz regiões/anos já concluídos (ignora o manifesto).",
+    )
     args = parser.parse_args()
 
     run(args)

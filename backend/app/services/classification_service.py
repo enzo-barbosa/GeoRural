@@ -45,6 +45,7 @@ from src.gee.preprocessor import preprocess_image
 from src.gee.topography import (
     classify_slope,
     compute_terrain,
+    dem_source_name,
     elevation_stats,
     get_dem,
     summarize,
@@ -61,8 +62,11 @@ from src.geo.overlay import (
     colorize_by_name,
     nearest_resize,
 )
+from src.geo.postprocess import majority_filter
 from src.geo.raster_io import read_geotiff
+from src.geo.relief import elevation_legend, make_relief_rgb
 from src.processing.features import extract_features_ee, get_feature_bands
+from src.processing.local_features import add_local_indices_array
 
 
 def _download_ee_image(
@@ -181,16 +185,16 @@ def _load_ensemble_weights(coverage: str, models: list[str]) -> dict[str, float]
     settings = get_settings()
     outputs = Path(settings.OUTPUTS_DIR)
 
+    selected: dict[str, float] = {}
+
     explicit = load_weights(str(outputs / "ensemble_weights.json"))
     if explicit:
         selected = {name: explicit[name] for name in models if name in explicit}
-        if selected:
-            return _fill_missing_weights(selected, models)
 
     metrics_path = outputs / (
         "metrics_brazil.json" if coverage == "brazil" else "metrics_global.json"
     )
-    if metrics_path.exists():
+    if not selected and metrics_path.exists():
         try:
             with open(metrics_path, encoding="utf-8") as f:
                 metrics = json.load(f)
@@ -207,10 +211,53 @@ def _load_ensemble_weights(coverage: str, models: list[str]) -> dict[str, float]
             for key, value in weights_from_metrics(metrics).items()
         }
         selected = {name: mapped[name] for name in models if name in mapped}
+
+    # Peso da U-Net vem do mIoU/F1 salvo pelo treino no Colab.
+    unet_metrics_path = outputs / "unet_metrics.json"
+    if (
+        "brazil_unet" in models
+        and "brazil_unet" not in selected
+        and unet_metrics_path.exists()
+    ):
+        try:
+            with open(unet_metrics_path, encoding="utf-8") as f:
+                unet_metrics = json.load(f)
+        except (OSError, ValueError):
+            unet_metrics = {}
+        unet_weight = unet_metrics.get("miou") or unet_metrics.get("macro_f1")
+        if unet_weight is not None:
+            selected["brazil_unet"] = max(float(unet_weight), 0.0)
+
+    if selected:
+        return _fill_missing_weights(selected, models)
+
+    return {}
+
+
+def _load_sp_weights(models: list[str]) -> dict[str, float]:
+    """Pesos do ensemble regional de São Paulo."""
+    settings = get_settings()
+    outputs = Path(settings.OUTPUTS_DIR)
+
+    explicit = load_weights(str(outputs / "ensemble_sp_weights.json"))
+    if explicit:
+        selected = {name: explicit[name] for name in models if name in explicit}
         if selected:
             return _fill_missing_weights(selected, models)
 
-    return {}
+    metrics_path = outputs / "metrics_sp.json"
+    if not metrics_path.exists():
+        return {}
+    try:
+        with open(metrics_path, encoding="utf-8") as file:
+            metrics = json.load(file)
+    except (OSError, ValueError):
+        return {}
+    weights = weights_from_metrics(
+        {key: value for key, value in metrics.items() if isinstance(value, dict)}
+    )
+    selected = {name: weights[name] for name in models if name in weights}
+    return _fill_missing_weights(selected, models)
 
 
 def _predict_probability_maps(
@@ -223,7 +270,18 @@ def _predict_probability_maps(
     height, width = image.shape[:2]
     flat = image.reshape(-1, image.shape[-1])
 
-    if classifier_name in {"auto", "ensemble"}:
+    if classifier_name == "sp_ensemble":
+        names = [
+            name
+            for name in ("sp_rf", "sp_svm")
+            if check_model_exists(name)
+        ]
+        if (
+            satellite == "sentinel2"
+            and check_model_exists("brazil_unet")
+        ):
+            names.append("brazil_unet")
+    elif classifier_name in {"auto", "ensemble"}:
         prefix = "brazil" if coverage == "brazil" else "global"
         names = [
             name
@@ -251,6 +309,14 @@ def _predict_probability_maps(
             "Modelo incompatível com a cobertura detectada "
             f"({coverage}). Use 'auto' ou um modelo do domínio correto."
         )
+    if any(name.startswith("sp_") for name in names) and coverage != "brazil":
+        raise RuntimeError(
+            "O modelo regional SP está disponível apenas para o Brasil."
+        )
+    if any(name.startswith("sp_") for name in names) and satellite != "sentinel2":
+        raise RuntimeError(
+            "O modelo regional SP foi treinado apenas com Sentinel-2."
+        )
 
     probabilities: dict[str, np.ndarray] = {}
     for name in names:
@@ -259,16 +325,30 @@ def _predict_probability_maps(
         if name.endswith("_unet"):
             if satellite != "sentinel2":
                 raise RuntimeError("A U-Net está disponível apenas para Sentinel-2.")
+            n_channels = getattr(model, "n_channels", image.shape[-1])
+            unet_input = image[..., :n_channels]
             proba = predict_unet_proba(
-                model, image, patch_size=64, stride=32, num_classes=NUM_CLASSES
+                model,
+                unet_input,
+                patch_size=64,
+                stride=32,
+                num_classes=NUM_CLASSES,
             )
             probabilities[name] = proba.reshape(height, width, NUM_CLASSES)
         else:
-            proba, classes = _model_probabilities(model, flat)
+            n_features = getattr(model, "n_features_in_", flat.shape[1])
+            model_flat = flat[:, :n_features]
+            proba, classes = _model_probabilities(model, model_flat)
             aligned = _align_probabilities(proba, classes)
             probabilities[name] = aligned.reshape(height, width, NUM_CLASSES)
 
-    weights = _load_ensemble_weights(coverage, names) if len(names) > 1 else {}
+    if len(names) > 1:
+        if any(name.startswith("sp_") for name in names):
+            weights = _load_sp_weights(names)
+        else:
+            weights = _load_ensemble_weights(coverage, names)
+    else:
+        weights = {}
     combined = soft_vote(probabilities, weights)
     pred_map = np.argmax(combined, axis=-1).astype(np.uint8)
 
@@ -301,6 +381,7 @@ def _classify_area_real(
         return None, None, None, None, [], {}
 
     image = np.moveaxis(data, 0, -1)
+    image = add_local_indices_array(image)
     pred_map, probabilities, models_used, weights = _predict_probability_maps(
         image, satellite, coverage, classifier_name
     )
@@ -350,7 +431,7 @@ def _class_areas(metrics: dict, names: list) -> list[dict]:
     result = []
     for item in metrics["classes"]:
         cid = item["class_id"]
-        if cid >= len(names):
+        if cid >= len(names) or item["pixels"] == 0:
             continue
         result.append(
             {
@@ -375,8 +456,14 @@ def _save_image(image: Image.Image, job_id: str, suffix: str) -> str:
     return f"/outputs/{job_id}/{suffix}.png"
 
 
+def _rgba_from_rgb(rgb: np.ndarray, mask: np.ndarray) -> Image.Image:
+    """Adiciona transparência a um RGB fora da máscara do polígono."""
+    alpha = np.where(mask, 255, 0).astype(np.uint8)
+    return Image.fromarray(np.dstack([rgb, alpha]), mode="RGBA")
+
+
 def _compute_topography(geometry, pred_map, transform, crs, mask, job_id):
-    """Executa a análise topográfica e retorna (stats, layer)."""
+    """Executa a análise topográfica e retorna (stats, layers)."""
     scale = 30
     dem = get_dem(geometry)
     terrain = compute_terrain(dem)
@@ -387,7 +474,7 @@ def _compute_topography(geometry, pred_map, transform, crs, mask, job_id):
         slope_img, geometry, scale=scale, bandas=["slope_class"]
     )
     if slope_data is None:
-        return None, None
+        return None, []
 
     slope_map = slope_data[0] if slope_data.ndim == 3 else slope_data
     slope_map = nearest_resize(slope_map, pred_map.shape).astype(np.uint8)
@@ -396,19 +483,59 @@ def _compute_topography(geometry, pred_map, transform, crs, mask, job_id):
         slope_map, transform, crs, valid_mask=mask
     )
     topography = summarize(stats, slope_metrics)
+    topography["dem_source"] = dem_source_name()
+    topography["dem_resolution_m"] = scale
+
+    layers = []
 
     slope_image = _layer_image(
         slope_map, SLOPE_CLASS_NAMES, SLOPE_CLASS_COLORS, mask
     )
     slope_url = _save_image(slope_image, job_id, "slope")
+    layers.append(
+        {
+            "name": "slope",
+            "label": "Declividade / Relevo",
+            "image_url": slope_url,
+            "legend": _legend(SLOPE_CLASS_NAMES, SLOPE_CLASS_COLORS),
+        }
+    )
 
-    layer = {
-        "name": "slope",
-        "label": "Declividade / Relevo",
-        "image_url": slope_url,
-        "legend": _legend(SLOPE_CLASS_NAMES, SLOPE_CLASS_COLORS),
-    }
-    return topography, layer
+    # Mapa de relevo: hipsometria + hillshade, exibido junto dos dados.
+    relief_data, _ = _download_ee_image(
+        terrain.select(["elevation", "hillshade"]),
+        geometry,
+        scale=scale,
+    )
+    if relief_data is not None and relief_data.shape[0] >= 2:
+        elevation = nearest_resize(relief_data[0], pred_map.shape)
+        hillshade = nearest_resize(relief_data[1], pred_map.shape)
+        relief_rgb = make_relief_rgb(
+            elevation,
+            hillshade,
+            vmin=stats.get("elevation_min"),
+            vmax=stats.get("elevation_max"),
+        )
+        relief_url = _save_image(
+            _rgba_from_rgb(relief_rgb, mask), job_id, "relief"
+        )
+        vmin = stats.get("elevation_min")
+        vmax = stats.get("elevation_max")
+        legend = (
+            elevation_legend(float(vmin), float(vmax))
+            if vmin is not None and vmax is not None
+            else []
+        )
+        layers.append(
+            {
+                "name": "relief",
+                "label": "Relevo (hipsometria + hillshade)",
+                "image_url": relief_url,
+                "legend": legend,
+            }
+        )
+
+    return topography, layers
 
 
 def _compute_crop(
@@ -474,6 +601,7 @@ async def classify_area(
     max_cloud: int,
     include_topography: bool = True,
     include_crop: bool = True,
+    postprocess: bool = True,
 ) -> dict:
     """Main classification pipeline."""
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -533,6 +661,13 @@ async def classify_area(
     mask = polygon_mask(polygon_coords, transform, crs, pred_map.shape)
     bounds = raster_bounds_lonlat(transform, crs, pred_map.shape)
 
+    postprocessed = False
+    if postprocess:
+        pred_map = majority_filter(
+            pred_map, mask, kernel_size=3, num_classes=NUM_CLASSES
+        )
+        postprocessed = True
+
     class_names = CLASS_NAMES if coverage == "brazil" else CLASS_NAMES_GLOBAL
 
     classification_img = _layer_image(
@@ -584,11 +719,10 @@ async def classify_area(
     topography = None
     if include_topography:
         try:
-            topography, slope_layer = _compute_topography(
+            topography, topo_layers = _compute_topography(
                 geometry, pred_map, transform, crs, mask, job_id
             )
-            if slope_layer:
-                layers.append(slope_layer)
+            layers.extend(topo_layers)
         except Exception:  # noqa: BLE001
             topography = None
 
@@ -637,6 +771,7 @@ async def classify_area(
         "class_areas": class_areas,
         "topography": topography,
         "crop_stats": crop_stats,
+        "postprocessed": postprocessed,
         "layers": layers,
         "classification_image_url": classification_url,
         "rgb_image_url": rgb_url,

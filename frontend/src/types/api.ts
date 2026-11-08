@@ -14,6 +14,9 @@ export type ClassifierName =
   | 'brazil_unet'
   | 'global_rf'
   | 'global_svm'
+  | 'sp_rf'
+  | 'sp_svm'
+  | 'sp_ensemble'
 
 export interface ClassifyRequest {
   polygon: PolygonGeometry
@@ -24,6 +27,7 @@ export interface ClassifyRequest {
   max_cloud: number
   include_topography?: boolean
   include_crop?: boolean
+  postprocess?: boolean
 }
 
 export interface CoverageRequest {
@@ -63,6 +67,8 @@ export interface SlopeClassArea {
 }
 
 export interface TopographyStats {
+  dem_source: string | null
+  dem_resolution_m: number | null
   elevation_min: number | null
   elevation_max: number | null
   elevation_mean: number | null
@@ -104,6 +110,7 @@ export interface ClassificationResult {
   class_areas: ClassArea[]
   topography: TopographyStats | null
   crop_stats: ClassArea[] | null
+  postprocessed?: boolean
   layers: LayerInfo[]
   classification_image_url: string
   rgb_image_url: string | null
@@ -130,6 +137,8 @@ export interface ModelsStatusResponse {
   brazil_unet: boolean
   global_rf: boolean
   global_svm: boolean
+  sp_rf: boolean
+  sp_svm: boolean
   crop: boolean
 }
 

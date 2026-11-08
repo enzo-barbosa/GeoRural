@@ -1,9 +1,6 @@
-"""Avaliação do ensemble (RF + SVM) em hold-out espacial por bioma.
+"""Avaliação do ensemble (RF + SVM) em hold-out espacial por bioma."""
 
-Também gera ``outputs/ensemble_weights.json`` a partir dos Kappas da
-validação espacial (usado pelo backend para ponderação).
-"""
-
+import argparse
 import json
 import os
 import sys
@@ -19,7 +16,6 @@ from src.classifiers.svm import train_svm
 from src.evaluation.metrics import full_evaluation
 from src.evaluation.spatial_split import spatial_holdout_indices
 from src.evaluation.training import (
-    SVM_MAX_SAMPLES,
     _cap_samples,
     load_domain_samples,
     train_domain,
@@ -35,8 +31,8 @@ def _proba(model, X, num_classes=6):
     return aligned
 
 
-def build_weights(prefix: str) -> dict[str, float]:
-    metrics_path = os.path.join(PROJECT_ROOT, f"outputs/metrics_{prefix}.json")
+def build_weights(prefix: str, output_dir: str) -> dict[str, float]:
+    metrics_path = os.path.join(output_dir, f"metrics_{prefix}.json")
     if not os.path.exists(metrics_path):
         return {}
     with open(metrics_path, encoding="utf-8") as f:
@@ -46,7 +42,7 @@ def build_weights(prefix: str) -> dict[str, float]:
         {k: v for k, v in metrics.items() if isinstance(v, dict)}
     )
     if weights:
-        out_path = os.path.join(PROJECT_ROOT, "outputs/ensemble_weights.json")
+        out_path = os.path.join(output_dir, "ensemble_weights.json")
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(weights, f, indent=2, ensure_ascii=False)
         print(f"Pesos salvos em {out_path}: {weights}")
@@ -54,22 +50,52 @@ def build_weights(prefix: str) -> dict[str, float]:
 
 
 def main():
-    csv_path = os.path.join(PROJECT_ROOT, "data/samples/brazil_samples.csv")
+    parser = argparse.ArgumentParser(description="Avalia o ensemble RF+SVM")
+    parser.add_argument("--csv", default=None)
+    parser.add_argument("--prefix", default="brazil")
+    parser.add_argument("--models-dir", default=None)
+    parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--svm-max", type=int, default=20_000)
+    parser.add_argument("--rf-trees", type=int, default=300)
+    parser.add_argument("--rf-depth", type=int, default=25)
+    parser.add_argument("--filter-regions", nargs="+", default=None)
+    parser.add_argument(
+        "--group-strategy",
+        default="auto",
+        choices=["auto", "block", "region", "biome"],
+    )
+    args = parser.parse_args()
+
+    prefix = args.prefix
+    models_dir = args.models_dir or os.path.join(PROJECT_ROOT, "models")
+    output_dir = args.output_dir or os.path.join(PROJECT_ROOT, "outputs")
+    csv_path = args.csv or os.path.join(
+        PROJECT_ROOT, f"data/samples/{prefix}_samples.csv"
+    )
     if not os.path.exists(csv_path):
-        raise FileNotFoundError(
-            "data/samples/brazil_samples.csv não encontrado. Rode a extração."
+        raise FileNotFoundError(f"CSV não encontrado: {csv_path}")
+
+    metrics_path = os.path.join(output_dir, f"metrics_{prefix}.json")
+    if not os.path.exists(metrics_path):
+        train_domain(
+            csv_path,
+            prefix=prefix,
+            svm_max_samples=args.svm_max,
+            models_dir=models_dir,
+            output_dir=output_dir,
+            rf_n_trees=args.rf_trees,
+            rf_max_depth=args.rf_depth,
+            filter_regions=args.filter_regions,
+            group_strategy=args.group_strategy,
         )
 
-    # Garante métricas/pesos atualizados (treina se necessário).
-    metrics_path = os.path.join(PROJECT_ROOT, "outputs/metrics_brazil.json")
-    if not os.path.exists(metrics_path):
-        train_domain(csv_path, prefix="brazil")
+    weights = build_weights(prefix, output_dir)
 
-    weights = build_weights("brazil")
-
-    _, feature_cols, X, y, groups = load_domain_samples(csv_path)
-    feature_cols = list(feature_cols)
-
+    _, _feature_cols, X, y, groups = load_domain_samples(
+        csv_path,
+        filter_regions=args.filter_regions,
+        group_strategy=args.group_strategy,
+    )
     train_idx, test_idx = spatial_holdout_indices(
         groups, test_size=0.25, random_state=42
     )
@@ -77,24 +103,31 @@ def main():
     y_train, y_test = y[train_idx], y[test_idx]
 
     print(f"Treino: {len(X_train)} | Teste: {len(X_test)}")
-    print(f"Features: {feature_cols}")
 
-    rf = train_random_forest(X_train, y_train, verbose=0)
+    rf = train_random_forest(
+        X_train,
+        y_train,
+        n_trees=args.rf_trees,
+        max_depth=args.rf_depth,
+        verbose=0,
+    )
     X_svm, y_svm, _ = _cap_samples(
-        X_train, y_train, groups[train_idx], SVM_MAX_SAMPLES
+        X_train, y_train, groups[train_idx], args.svm_max
     )
     svm = train_svm(
         X_svm, y_svm, verbose=False, probability=True
     )
 
+    rf_name = f"{prefix}_rf"
+    svm_name = f"{prefix}_svm"
     rf_pred = rf.predict(X_test)
     svm_pred = svm.predict(X_test)
     rf_metrics = full_evaluation(y_test, rf_pred)
     svm_metrics = full_evaluation(y_test, svm_pred)
 
     proba = {
-        "brazil_rf": _proba(rf, X_test),
-        "brazil_svm": _proba(svm, X_test),
+        rf_name: _proba(rf, X_test),
+        svm_name: _proba(svm, X_test),
     }
     ensemble_proba = soft_vote(proba, weights)
     ensemble_pred = np.argmax(ensemble_proba, axis=-1)
@@ -105,20 +138,20 @@ def main():
         "n_train": len(X_train),
         "n_test": len(X_test),
         "weights": weights,
-        "brazil_rf": rf_metrics,
-        "brazil_svm": svm_metrics,
+        rf_name: rf_metrics,
+        svm_name: svm_metrics,
         "ensemble": ensemble_metrics,
     }
 
     print("\n=== COMPARAÇÃO ===")
-    for name in ("brazil_rf", "brazil_svm", "ensemble"):
-        m = results[name]
+    for name in (rf_name, svm_name, "ensemble"):
+        metrics = results[name]
         print(
-            f"{name:<12} acc={m['overall_accuracy']:.4f} "
-            f"kappa={m['kappa']:.4f}"
+            f"{name:<14} acc={metrics['overall_accuracy']:.4f} "
+            f"kappa={metrics['kappa']:.4f}"
         )
 
-    out_path = os.path.join(PROJECT_ROOT, "outputs/ensemble_metrics.json")
+    out_path = os.path.join(output_dir, "ensemble_metrics.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     print(f"\nMétricas salvas em {out_path}")

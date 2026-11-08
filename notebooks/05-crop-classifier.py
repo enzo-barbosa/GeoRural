@@ -5,6 +5,7 @@ Se ``data/samples/crop_samples.csv`` existir, usa rótulos reais do MapBiomas
 espacial por bioma. Caso contrário, cai no dataset sintético de perfis.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -101,12 +102,23 @@ def train_with_real_labels(csv_path: str):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Treina o classificador de cultivo")
+    parser.add_argument("--csv", default=None)
+    parser.add_argument("--models-dir", default=None)
+    parser.add_argument("--output-dir", default=None)
+    args = parser.parse_args()
+
+    models_dir = args.models_dir or os.path.join(PROJECT_ROOT, "models")
+    output_dir = args.output_dir or os.path.join(PROJECT_ROOT, "outputs")
+
     print("=" * 60)
     print("CLASSIFICADOR DE TIPO DE CULTIVO")
     print("=" * 60)
     print("Culturas:", ", ".join(CROP_NAMES))
 
-    real_csv = os.path.join(PROJECT_ROOT, "data/samples/crop_samples.csv")
+    real_csv = args.csv or os.path.join(
+        PROJECT_ROOT, "data/samples/crop_samples.csv"
+    )
     if os.path.exists(real_csv):
         print(f"Fonte: rótulos MapBiomas ({real_csv})")
         model, metrics = train_with_real_labels(real_csv)
@@ -131,13 +143,13 @@ def main():
             f"{row.get('f1-score', 0):>10.4f}"
         )
 
-    os.makedirs(os.path.join(PROJECT_ROOT, "models"), exist_ok=True)
-    save_path = os.path.join(PROJECT_ROOT, "models/crop_classifier.pkl")
+    os.makedirs(models_dir, exist_ok=True)
+    save_path = os.path.join(models_dir, "crop_classifier.pkl")
     save_model(model, save_path)
     print(f"\nModelo salvo em: {save_path}")
 
-    os.makedirs(os.path.join(PROJECT_ROOT, "outputs"), exist_ok=True)
-    metrics_path = os.path.join(PROJECT_ROOT, "outputs/crop_metrics.json")
+    os.makedirs(output_dir, exist_ok=True)
+    metrics_path = os.path.join(output_dir, "crop_metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2, ensure_ascii=False, default=str)
     print(f"Métricas salvas em: {metrics_path}")

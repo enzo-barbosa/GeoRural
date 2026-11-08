@@ -29,12 +29,16 @@ class ClassifyRequest(BaseModel):
         "brazil_unet",
         "global_rf",
         "global_svm",
+        "sp_rf",
+        "sp_svm",
+        "sp_ensemble",
     ] = "auto"
     start_date: date
     end_date: date
     max_cloud: int = Field(default=80, ge=0, le=100)
     include_topography: bool = True
     include_crop: bool = True
+    postprocess: bool = True
 
 
 class ClassStats(BaseModel):
@@ -75,6 +79,8 @@ class SlopeClassArea(BaseModel):
 class TopographyStats(BaseModel):
     """Análise topográfica do terreno."""
 
+    dem_source: str | None = None
+    dem_resolution_m: int | None = None
     elevation_min: float | None = None
     elevation_max: float | None = None
     elevation_mean: float | None = None
@@ -122,6 +128,7 @@ class ClassificationResult(BaseModel):
     class_areas: list[ClassArea] = []
     topography: TopographyStats | None = None
     crop_stats: list[ClassArea] | None = None
+    postprocessed: bool = False
     layers: list[LayerInfo] = []
     classification_image_url: str
     rgb_image_url: str | None = None
@@ -155,6 +162,8 @@ class ModelsStatusResponse(BaseModel):
     brazil_unet: bool = False
     global_rf: bool = False
     global_svm: bool = False
+    sp_rf: bool = False
+    sp_svm: bool = False
     crop: bool = False
 
 

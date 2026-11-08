@@ -4,6 +4,7 @@ As caixas são representativas (não exaustivas) e foram escolhidas para cobrir
 biomas e sistemas agrícolas distintos, minimizando sobreposição.
 """
 
+import math
 from dataclasses import dataclass
 
 import ee
@@ -203,21 +204,65 @@ def get_region(name: str) -> Region:
     raise KeyError(f"Região desconhecida: {name}")
 
 
-def resolve_unet_regions(names: list[str] | None) -> list[Region]:
-    """Resolve 'all' ou nomes de tiles pequenos para a U-Net."""
-    if not names or names == ["all"]:
-        return UNET_REGIONS
+def generate_unet_tiles(
+    regions: list[Region], tiles_per_region: int = 4, tile_size: float = 0.08
+) -> list[Region]:
+    """Gera sub-tiles quadrados ao redor do centro de cada região."""
+    if tiles_per_region <= 1:
+        return regions
 
-    selected = []
-    for name in names:
-        region = get_region(name)
-        if region.name not in {r.name for r in UNET_REGIONS}:
-            raise ValueError(
-                f"{name} não é um tile de U-Net. Use: "
-                f"{[r.name for r in UNET_REGIONS]}"
-            )
-        selected.append(region)
-    return selected
+    cols = math.ceil(math.sqrt(tiles_per_region))
+    rows = math.ceil(tiles_per_region / cols)
+    step = tile_size * 1.02
+    tiles = []
+
+    for base in regions:
+        min_lon, min_lat, max_lon, max_lat = base.bbox
+        center_lon = (min_lon + max_lon) / 2
+        center_lat = (min_lat + max_lat) / 2
+        start_lon = center_lon - (cols * step) / 2
+        start_lat = center_lat - (rows * step) / 2
+
+        for row in range(rows):
+            for col in range(cols):
+                index = row * cols + col
+                if index >= tiles_per_region:
+                    break
+                lon = start_lon + col * step
+                lat = start_lat + row * step
+                tiles.append(
+                    Region(
+                        f"{base.name}_t{index}",
+                        base.domain,
+                        base.biome,
+                        base.country,
+                        (lon, lat, lon + tile_size, lat + tile_size),
+                    )
+                )
+
+    return tiles
+
+
+def resolve_unet_regions(
+    names: list[str] | None,
+    tiles_per_region: int = 1,
+    tile_size: float = 0.08,
+) -> list[Region]:
+    """Resolve 'all'/nomes e, opcionalmente, gera sub-tiles por região."""
+    if not names or names == ["all"]:
+        selected = UNET_REGIONS
+    else:
+        selected = []
+        for name in names:
+            region = get_region(name)
+            if region.name not in {r.name for r in UNET_REGIONS}:
+                raise ValueError(
+                    f"{name} não é um tile de U-Net. Use: "
+                    f"{[r.name for r in UNET_REGIONS]}"
+                )
+            selected.append(region)
+
+    return generate_unet_tiles(selected, tiles_per_region, tile_size)
 
 
 def resolve_regions(domain: str, names: list[str] | None) -> list[Region]:
