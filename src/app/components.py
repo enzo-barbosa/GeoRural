@@ -53,7 +53,7 @@ def classification_legend():
             <div>Vegetação Nativa</div>
         </div>
         <div class="legend-item">
-            <div class="legend-color" style="background-color: #27ae60;"></div>
+            <div class="legend-color" style="background-color: #0E6B3D;"></div>
             <div>Pastagem</div>
         </div>
         <div class="legend-item">

@@ -31,7 +31,7 @@ const steps = [
 
 const classes = [
   { name: 'Vegetação Nativa', description: 'Mata, cerrado, floresta', color: '#1a5276' },
-  { name: 'Pastagem', description: 'Áreas de pasto', color: '#27ae60' },
+  { name: 'Pastagem', description: 'Áreas de pasto', color: '#0E6B3D' },
   { name: 'Agricultura', description: 'Lavouras cultivadas', color: '#2ecc71' },
   { name: 'Solo Exposto', description: 'Terra sem cobertura', color: '#f39c12' },
   { name: 'Área Construída', description: 'Edificações, estradas', color: '#e74c3c' },

@@ -192,7 +192,7 @@ def render_classify():
         st.markdown("**Legenda das classes:**")
         legend_items = [
             ("Vegetação Nativa", CLASS_COLORS.get("Vegetação Nativa", "#1a5276")),
-            ("Pastagem", CLASS_COLORS.get("Pastagem", "#27ae60")),
+            ("Pastagem", CLASS_COLORS.get("Pastagem", "#0E6B3D")),
             ("Agricultura", CLASS_COLORS.get("Agricultura", "#2ecc71")),
             ("Solo Exposto", CLASS_COLORS.get("Solo Exposto", "#f39c12")),
             ("Área Construída", CLASS_COLORS.get("Área Construída", "#e74c3c")),

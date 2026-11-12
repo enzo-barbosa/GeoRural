@@ -37,6 +37,9 @@
   - **Treinada no Colab T4 (08/11/2026)**: `models/brazil_unet.pth` (124 MB,
     15 canais, 6 classes); early stop na Ã©poca 67, melhor Ã©poca ~55.
   - O loader do backend infere os canais do `state_dict` (15) e carrega o modelo.
+  - Áreas menores que 64×64 px são aceitas: `_pad_to_grid` replica as bordas
+    até 64×64 e recorta a saída. Se a U-Net falhar, o ensemble segue com RF/SVM.
+    Para resultados quantitativos, prefira áreas maiores que 640×640 m (~41 ha).
   - **CorreÃ§Ã£o do dataset (nov/2026):** NDVI/EVI agora tÃªm `clamp(-1,1)`;
     `sanitize_features`/`sanitize_labels` removem NaN/Inf/outliers; tiles sem
     labels vÃ¡lidos sÃ£o descartados. Dos 32 originais, **26 sÃ£o vÃ¡lidos**:

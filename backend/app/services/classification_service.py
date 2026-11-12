@@ -319,6 +319,7 @@ def _predict_probability_maps(
         )
 
     probabilities: dict[str, np.ndarray] = {}
+    used: list[str] = []
     for name in names:
         model = get_cached_model(name)
 
@@ -327,13 +328,22 @@ def _predict_probability_maps(
                 raise RuntimeError("A U-Net está disponível apenas para Sentinel-2.")
             n_channels = getattr(model, "n_channels", image.shape[-1])
             unet_input = image[..., :n_channels]
-            proba = predict_unet_proba(
-                model,
-                unet_input,
-                patch_size=64,
-                stride=32,
-                num_classes=NUM_CLASSES,
-            )
+            try:
+                proba = predict_unet_proba(
+                    model,
+                    unet_input,
+                    patch_size=64,
+                    stride=32,
+                    num_classes=NUM_CLASSES,
+                )
+            except ValueError as exc:
+                if len(names) == 1:
+                    raise RuntimeError(
+                        "Área muito pequena para a U-Net. "
+                        "Selecione Random Forest/SVM ou aumente a área."
+                    ) from exc
+                print(f"[warn] U-Net ignorada nesta classificação: {exc}")
+                continue
             probabilities[name] = proba.reshape(height, width, NUM_CLASSES)
         else:
             n_features = getattr(model, "n_features_in_", flat.shape[1])
@@ -341,12 +351,18 @@ def _predict_probability_maps(
             proba, classes = _model_probabilities(model, model_flat)
             aligned = _align_probabilities(proba, classes)
             probabilities[name] = aligned.reshape(height, width, NUM_CLASSES)
+        used.append(name)
 
-    if len(names) > 1:
-        if any(name.startswith("sp_") for name in names):
-            weights = _load_sp_weights(names)
+    if not used:
+        raise RuntimeError(
+            "Nenhum modelo conseguiu processar a área selecionada."
+        )
+
+    if len(used) > 1:
+        if any(name.startswith("sp_") for name in used):
+            weights = _load_sp_weights(used)
         else:
-            weights = _load_ensemble_weights(coverage, names)
+            weights = _load_ensemble_weights(coverage, used)
     else:
         weights = {}
     combined = soft_vote(probabilities, weights)
@@ -354,9 +370,9 @@ def _predict_probability_maps(
 
     normalized = {
         name: round(value, 4)
-        for name, value in normalize_weights(names, weights).items()
+        for name, value in normalize_weights(used, weights).items()
     }
-    return pred_map, combined, names, normalized
+    return pred_map, combined, used, normalized
 
 
 def _classify_area_real(

@@ -39,7 +39,7 @@ export function ResultMap({ bounds, rgbImageUrl, layers }: ResultMapProps) {
               name={layer.label}
               checked={layer.name === 'classification'}
             >
-              <ImageOverlay url={layer.image_url} bounds={bounds} opacity={0.6} />
+              <ImageOverlay url={layer.image_url} bounds={bounds} opacity={0.75} />
             </LayersControl.Overlay>
           ))}
         </LayersControl>

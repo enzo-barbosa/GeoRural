@@ -116,6 +116,9 @@ pip install -e ".[dev,backend]"
    patches sob demanda, checkpoints no Drive). O pacote pronto para upload estÃ¡
    em `data/colab_upload/` (inclui `LEIA-ME.md` e checksums).
    Gera `models/brazil_unet.pth`. Já treinada (08/11/2026): acurácia 0,824, mIoU 0,449 e macro F1 0,543 no tile de validação. No ensemble com maioria 3×3, o tile de Piracicaba chegou a 0,843 (Brasil) e 0,870 (regional SP).
+   Áreas pequenas (ex.: 24×83 px) são aceitas: as bordas são replicadas até
+   64×64 e o resultado é recortado. Para números confiáveis, use áreas
+   maiores que 640×640 m (~41 ha).
 
 6. Execute backend + frontend:
    ```bash

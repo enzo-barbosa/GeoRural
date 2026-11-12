@@ -29,7 +29,7 @@ const CLASSIFIER_OPTIONS = [
 
 const CLASS_LEGEND = [
   { name: 'Vegetação Nativa', color: '#1a5276' },
-  { name: 'Pastagem', color: '#27ae60' },
+  { name: 'Pastagem', color: '#0E6B3D' },
   { name: 'Agricultura', color: '#2ecc71' },
   { name: 'Solo Exposto', color: '#f39c12' },
   { name: 'Área Construída', color: '#e74c3c' },

@@ -30,8 +30,8 @@ import {
 
 const CLASS_COLORS: Record<string, string> = {
   'Vegetação Nativa': '#1a5276',
-  'Pastagem': '#27ae60',
-  'Pastagem / Veg. Herbácea': '#27ae60',
+  'Pastagem': '#0E6B3D',
+  'Pastagem / Veg. Herbácea': '#0E6B3D',
   'Agricultura': '#2ecc71',
   'Solo Exposto': '#f39c12',
   'Área Construída': '#e74c3c',
@@ -41,7 +41,7 @@ const CLASS_COLORS: Record<string, string> = {
 const CROP_COLORS: Record<string, string> = {
   'Cana-de-açúcar': '#8e44ad',
   'Citros': '#f1c40f',
-  'Pastagem': '#27ae60',
+  'Pastagem': '#0E6B3D',
   'Soja': '#16a085',
   'Milho': '#e67e22',
 }

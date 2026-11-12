@@ -829,20 +829,29 @@ def load_model(model: nn.Module, filepath: str, device: str | None = None):
 def _pad_to_grid(
     image: np.ndarray, patch_size: int, stride: int
 ) -> tuple[np.ndarray, int, int]:
-    """Preenche bordas para que todos os pixels sejam cobertos por patches."""
-    height, width = image.shape[:2]
-    if height < patch_size or width < patch_size:
-        raise ValueError(
-            f"Imagem ({height}x{width}) menor que patch_size ({patch_size})."
-        )
+    """Preenche bordas para que todos os pixels sejam cobertos por patches.
 
-    pad_h = (stride - (height - patch_size) % stride) % stride
-    pad_w = (stride - (width - patch_size) % stride) % stride
+    Imagens menores que ``patch_size`` são aceitas: as bordas são replicadas
+    (``mode="edge"``) até o tamanho mínimo do patch. Isso evita falhas em
+    áreas pequenas, mantendo o mesmo modelo e a mesma escala do treino.
+    """
+    original_h, original_w = image.shape[:2]
+
+    pad_h = max(0, patch_size - original_h)
+    pad_w = max(0, patch_size - original_w)
     if pad_h or pad_w:
         image = np.pad(
             image, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge"
         )
-    return image, height, width
+
+    height, width = image.shape[:2]
+    grid_h = (stride - (height - patch_size) % stride) % stride
+    grid_w = (stride - (width - patch_size) % stride) % stride
+    if grid_h or grid_w:
+        image = np.pad(
+            image, ((0, grid_h), (0, grid_w), (0, 0)), mode="edge"
+        )
+    return image, original_h, original_w
 
 
 def predict_unet_proba(
