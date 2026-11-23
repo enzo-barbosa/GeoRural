@@ -146,3 +146,15 @@ export interface HealthResponse {
   status: 'healthy' | 'degraded'
   gee_initialized: boolean
 }
+
+export interface GeocodeResult {
+  display_name: string
+  lat: number
+  lon: number
+  /** [south, north, west, east] como no Nominatim */
+  bbox?: [number, number, number, number] | null
+}
+
+export interface GeocodeResponse {
+  results: GeocodeResult[]
+}

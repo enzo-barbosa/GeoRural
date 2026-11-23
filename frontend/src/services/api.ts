@@ -4,6 +4,8 @@ import type {
   ClassifyResponse,
   CoverageRequest,
   CoverageResponse,
+  GeocodeResponse,
+  GeocodeResult,
   ModelsStatusResponse,
   HealthResponse,
 } from '@/types/api'
@@ -37,6 +39,15 @@ export const healthApi = {
   check: async (): Promise<HealthResponse> => {
     const response = await api.get<HealthResponse>('/health')
     return response.data
+  },
+}
+
+export const geocodeApi = {
+  search: async (q: string, limit = 5): Promise<GeocodeResult[]> => {
+    const response = await api.get<GeocodeResponse>('/geocode', {
+      params: { q, limit },
+    })
+    return response.data.results
   },
 }
 

@@ -126,6 +126,46 @@ def repair_tile(
     return image, labels, report
 
 
+def patch_coverage(
+    labels: np.ndarray,
+    patch_size: int = 64,
+    stride: int = 32,
+    ignore_label: int = IGNORE_LABEL,
+) -> dict:
+    """Conta quantos patches da grade de treino contêm cada classe.
+
+    Mede o desbalanceamento no nível em que a U-Net realmente aprende: um
+    patch só contribui para uma classe se ela estiver presente nele.
+    """
+    labels = np.asarray(labels)
+    height, width = labels.shape
+
+    total = 0
+    counts = {class_id: 0 for class_id in range(NUM_CLASSES)}
+    for y in range(0, height - patch_size + 1, stride):
+        for x in range(0, width - patch_size + 1, stride):
+            patch = labels[y : y + patch_size, x : x + patch_size]
+            present = np.unique(patch[patch != ignore_label])
+            if present.size == 0:
+                continue
+            total += 1
+            for value in present:
+                if 0 <= int(value) < NUM_CLASSES:
+                    counts[int(value)] += 1
+
+    fractions = {
+        class_id: round(count / total, 4) if total else 0.0
+        for class_id, count in counts.items()
+    }
+    return {
+        "patch_size": patch_size,
+        "stride": stride,
+        "total_patches": total,
+        "patches_with_class": counts,
+        "fraction": fractions,
+    }
+
+
 def write_report(report: dict, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as file:

@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     DEFAULT_PATCH_SIZE: int = 64
     DEFAULT_STRIDE: int = 32
     MAX_PIXELS_DOWNLOAD: int = 1_000_000_000
+    # Limites para não estourar a memória nem o getDownloadURL do GEE.
+    MAX_CLASSIFY_PIXELS: int = 6_000_000
+    MAX_DOWNLOAD_BYTES: int = 40_000_000
 
 
 @lru_cache

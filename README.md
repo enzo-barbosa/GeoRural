@@ -12,6 +12,7 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 - **Pós-processamento** por maioria 3×3 e **relatório de calibração** (ECE/Brier/NLL)
 - Medidas reais (área/perímetro), topografia (NASADEM/GLO-30) e **mapa de relevo** com hipsometria + hillshade
 - Tipo de cultivo (Brasil) e interface web React com mapa Leaflet
+- **Busca por endereço ou coordenadas** (Nominatim/OSM) que centraliza o mapa no local
 
 ## Requisitos
 
@@ -100,25 +101,50 @@ pip install -e ".[dev,backend]"
    Gera `models/v2/sp/sp_rf.pkl`, `sp_svm.pkl`, relatórios de calibração
    (ECE/Brier/NLL/reliability) e o ganho do filtro de maioria no raster.
 
-5. Rasters da U-Net (32 gerados; 26 v�lidos ap�s valida��o: regiões × 4):
+5. Rasters da U-Net (**38 válidos**: 26 tiles dos 8 biomas + 12 tiles
+   dirigidos — 4 água, 4 solo exposto e 4 urbanos):
    ```bash
    python src/gee/build_unet_dataset.py --regions all --tiles-per-region 4 \
      --tile-size 0.08 --out data/processed/unet_full \
      --year 2023 --start 2023-01-01 --end 2023-12-31 --skip-existing
+
+   python src/gee/build_unet_dataset.py \
+     --regions unet_agua_ilha_solteira unet_agua_itaipu \
+       unet_agua_balbina unet_agua_manaus \
+       unet_solo_carajas unet_solo_quadrilatero \
+       unet_solo_lencois unet_solo_paracatu \
+       unet_urbano_sao_paulo unet_urbano_campinas \
+       unet_urbano_goiania unet_urbano_belo_horizonte \
+     --tiles-per-region 1 --out data/processed/unet_full \
+     --year 2023 --start 2023-01-01 --end 2023-12-31 --skip-existing
    ```
+   A composição passou de 18,7M para 23,7M pixels válidos: Solo 0,3%→5,2%,
+   Água 0,5%→4,9% e Área Construída 2,0%→10,0%. A cobertura de patches
+   (patch 64/stride 32) das raras subiu de ~4% para ~10%.
    Valide/repare antes de zipar:
    ```bash
    python scripts/validate_unet_dataset.py --dir data/processed/unet_full --fix --move-invalid
    python scripts/check_unet_tile.py --tile unet_piracicaba_t0
    ```
    Treine no **Colab (T4)** com `notebooks/04-unet-training-colab.ipynb`
-   (leave-one-tile-out, 6 classes, augmentation, 15 canais com índices locais,
-   patches sob demanda, checkpoints no Drive). O pacote pronto para upload está
-   em `data/colab_upload/` (inclui `LEIA-ME.md` e checksums).
-   Gera `models/brazil_unet.pth`. J� treinada (08/11/2026): acur�cia 0,824, mIoU 0,449 e macro F1 0,543 no tile de valida��o. No ensemble com maioria 3�3, o tile de Piracicaba chegou a 0,843 (Brasil) e 0,870 (regional SP).
-   �reas pequenas (ex.: 24�83 px) s�o aceitas: as bordas s�o replicadas at�
-   64�64 e o resultado � recortado. Para n�meros confi�veis, use �reas
-   maiores que 640�640 m (~41 ha).
+   (validação **multi-tile**, 6 classes, amostragem de patches centrada nas
+   classes raras 3/4/5, `FocalLoss(γ=2)` + pesos `1/sqrt(freq)`, augmentation,
+   15 canais com índices locais, patches sob demanda, checkpoints no Drive).
+   O pacote pronto para upload está em `data/colab_upload/` (inclui
+   `LEIA-ME.md` e checksums).
+   Gera `models/brazil_unet.pth`. Modelo atual (antes da Etapa A): acurácia
+   0,824, mIoU 0,449 e macro F1 0,543 no tile de validação. No ensemble com
+   maioria 3×3, o tile de Piracicaba chegou a 0,843 (Brasil) e 0,870 (SP).
+   Cobertura de patches por classe (38 tiles): Veg 78,1%, Past 57,1%,
+   Agri 35,0%, **Solo 10,4%, Urbano 13,1%, Água 10,5%** (antes: 4,1/5,3/3,8).
+   Áreas pequenas (ex.: 24×83 px) são aceitas: as bordas são replicadas até
+   64×64 e o resultado é recortado. Para números confiáveis, use áreas maiores
+   que 640×640 m (~41 ha).
+
+   Para testar a cota do GEE antes de gerar novos tiles:
+   ```bash
+   python scripts/check_gee_quota.py --lon -48.55 --lat -22.49 --size-km 2
+   ```
 
 6. Execute backend + frontend:
    ```bash

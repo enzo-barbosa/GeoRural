@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { classifyApi, healthApi } from '@/services/api'
+import { classifyApi, geocodeApi, healthApi } from '@/services/api'
 import type { ClassifyRequest } from '@/types/api'
 
 export function useHealth() {
@@ -41,5 +41,16 @@ export function useClassificationResult(jobId: string | null) {
     },
     enabled: !!jobId,
     refetchInterval: 2000,
+  })
+}
+
+export function useGeocode(query: string) {
+  const normalized = query.trim()
+  return useQuery({
+    queryKey: ['geocode', normalized],
+    queryFn: () => geocodeApi.search(normalized),
+    enabled: normalized.length >= 3,
+    staleTime: 5 * 60 * 1000,
+    retry: 0,
   })
 }

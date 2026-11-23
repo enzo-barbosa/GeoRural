@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, LayersControl, useMapEvents } from 'react-leaflet'
+import {
+  MapContainer,
+  TileLayer,
+  LayersControl,
+  Marker,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 import L from 'leaflet'
@@ -21,6 +28,47 @@ interface MapViewProps {
   onRemove: () => void
   initialPolygon?: number[][][] | null
   disabled?: boolean
+  focus?: MapFocus | null
+  marker?: [number, number] | null
+}
+
+export interface MapFocus {
+  lat: number
+  lon: number
+  zoom?: number
+  /** [south, north, west, east], como no Nominatim */
+  bbox?: [number, number, number, number] | null
+  /** Muda a cada busca para forçar o reposicionamento. */
+  id?: number
+}
+
+function MapController({
+  focus,
+  marker,
+}: {
+  focus?: MapFocus | null
+  marker?: [number, number] | null
+}) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!focus) return
+    if (focus.bbox && focus.bbox.length === 4) {
+      const [south, north, west, east] = focus.bbox
+      map.fitBounds(
+        [
+          [south, west],
+          [north, east],
+        ],
+        { padding: [24, 24], maxZoom: 16 }
+      )
+    } else {
+      map.flyTo([focus.lat, focus.lon], focus.zoom ?? 14, { duration: 1.2 })
+    }
+  }, [map, focus])
+
+  if (!marker) return null
+  return <Marker position={marker} />
 }
 
 function DrawControl({ onDraw, onRemove, initialPolygon, disabled }: MapViewProps) {
@@ -119,6 +167,8 @@ export function MapView({
   onRemove,
   initialPolygon,
   disabled = false,
+  focus = null,
+  marker = null,
 }: MapViewProps) {
   return (
     <div className="w-full h-[500px] rounded-lg border border-gray-200 overflow-hidden" style={{ zIndex: 0 }}>
@@ -158,6 +208,7 @@ export function MapView({
           initialPolygon={initialPolygon}
           disabled={disabled}
         />
+        <MapController focus={focus} marker={marker} />
       </MapContainer>
     </div>
   )

@@ -14,6 +14,7 @@ from PIL import Image
 
 from backend.app.config import get_settings
 from backend.app.dependencies.models import check_model_exists, get_cached_model
+from backend.app.services.limits import area_limit_message, bands_per_download
 from src.classifiers.crop_classifier import load_model as load_crop_model
 from src.classifiers.crop_classifier import predict_crop_map
 from src.classifiers.ensemble import (
@@ -70,9 +71,19 @@ from src.processing.local_features import add_local_indices_array
 
 
 def _download_ee_image(
-    image: ee.Image, geometry, scale: int, bandas: list | None = None
+    image: ee.Image,
+    geometry,
+    scale: int,
+    bandas: list | None = None,
+    estimated_pixels: int | None = None,
 ):
-    """Baixa uma imagem GEE como numpy array (em blocos de até 6 bandas)."""
+    """Baixa uma imagem GEE como numpy array.
+
+    O ``getDownloadURL`` do GEE aceita no máximo ~48 MB por requisição.
+    Por isso as bandas são divididas em grupos pequenos: em áreas grandes,
+    baixa-se uma banda por vez. Áreas que nem assim cabem são rejeitadas
+    com uma mensagem clara.
+    """
     if bandas:
         image = image.select(bandas)
 
@@ -80,11 +91,22 @@ def _download_ee_image(
     if not bands:
         return None, None
 
+    settings = get_settings()
+    max_bytes = settings.MAX_DOWNLOAD_BYTES
+
+    if estimated_pixels is None:
+        area_m2 = geometry.area(maxError=1).getInfo()
+        estimated_pixels = max(int(area_m2 / (scale * scale)), 1)
+
+    bands_per_chunk = min(
+        bands_per_download(estimated_pixels, max_bytes), len(bands)
+    )
+
     chunks = []
     meta = None
 
-    for i in range(0, len(bands), 6):
-        group = bands[i : i + 6]
+    for i in range(0, len(bands), bands_per_chunk):
+        group = bands[i : i + bands_per_chunk]
         url = image.select(group).getDownloadURL(
             {
                 "region": geometry,
@@ -380,17 +402,24 @@ def _classify_area_real(
     satellite: str,
     coverage: str,
     classifier_name: str,
+    estimated_pixels: int | None = None,
 ):
     """Apply trained model(s) to image and return maps, RGB and metadata."""
     scale = 10 if satellite == "sentinel2" else 30
 
     rgb_img = _get_rgb_composite(composite, satellite)
-    rgb_data, _ = _download_ee_image(rgb_img, composite.geometry(), scale=scale)
+    rgb_data, _ = _download_ee_image(
+        rgb_img,
+        composite.geometry(),
+        scale=scale,
+        estimated_pixels=estimated_pixels,
+    )
 
     data, meta_all = _download_ee_image(
         composite.select(get_feature_bands(satellite)),
         composite.geometry(),
         scale=scale,
+        estimated_pixels=estimated_pixels,
     )
 
     if data is None or data.size == 0 or rgb_data is None or rgb_data.size == 0:
@@ -625,6 +654,20 @@ async def classify_area(
 
     geometry = polygon_to_ee_geometry(polygon_coords)
 
+    poly = polygon_metrics(polygon_coords)
+    area_ha = float(poly.get("area_ha", 0.0))
+    scale = 10 if satellite == "sentinel2" else 30
+    limit_message = area_limit_message(
+        area_ha, scale, get_settings().MAX_CLASSIFY_PIXELS
+    )
+    if limit_message:
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "error": limit_message,
+        }
+    estimated_pixels = int(area_ha * 10_000 / (scale * scale))
+
     try:
         coverage = get_coverage(polygon_coords)
     except Exception as exc:  # noqa: BLE001
@@ -654,7 +697,11 @@ async def classify_area(
     try:
         pred_map, probabilities, meta, rgb_image, models_used, weights = (
             _classify_area_real(
-                composite, satellite, coverage, classifier_name
+                composite,
+                satellite,
+                coverage,
+                classifier_name,
+                estimated_pixels=estimated_pixels,
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -708,7 +755,6 @@ async def classify_area(
     raster_metrics = compute_raster_metrics(
         pred_map, transform, crs, valid_mask=mask
     )
-    poly = polygon_metrics(polygon_coords)
     class_areas = _class_areas(raster_metrics, class_names)
     total_area_ha = poly.get("area_ha") or raster_metrics["total_area_ha"]
     measurements = {

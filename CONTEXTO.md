@@ -27,19 +27,38 @@
 - **Ensemble** (`src/classifiers/ensemble.py`): votação suave, pesos por Kappa
   (`outputs/ensemble_weights.json`), fallback para modelos ausentes.
 - **U-Net** (Brasil, 6 classes):
-  - **32 tiles gerados, 26 v�lidos** em `data/processed/unet_full/` (~867 MB) +
-    `unet_dataset_full.zip` (~334 MB); 9 bandas + 6 índices locais = 15 canais.
+  - **38 tiles válidos** em `data/processed/unet_full/` (~1,1 GB): 26 dos
+    8 biomas + 12 dirigidos (4 água, 4 solo, 4 urbanos); 9 bandas + 6 índices
+    locais = 15 canais. O zip para o Colab é regenerado em
+    `data/processed/unet_dataset_full.zip`.
   - `PatchDataset` sob demanda (não materializa ~20 mil patches na RAM),
     `predict_unet_proba`, `ignore_index=255`, augmentation (flip/rot90/jitter),
     `WeightedRandomSampler`, early stopping, checkpoint/resume e mIoU/F1.
+  - **Etapa A (retreino rebalanceado):** amostragem de patches centrada nas
+    classes raras (`rare_patches_per_class`), `FocalLoss(gamma=2)` e pesos
+    `1/sqrt(freq)` (`class_weights(exponent=0.5)`), com validação multi-tile
+    (`VAL_TILES` com 6 tiles: 4 antigos + `unet_solo_quadrilatero` e
+    `unet_solo_paracatu`, cobrindo Solo/Urbano/Água).
+  - **Correção do sampler (22/11/2026):** `sample_weights` dava peso `1.0`
+    aos patches 100% `255` e ~`1e-8` aos válidos; o `WeightedRandomSampler`
+    escolhia quase só patches vazios, resultando em `Train Loss/Acc = 0`.
+    Agora patches vazios têm peso `0` e os válidos são normalizados (média 1).
+    Regressão coberta por testes em `tests/unit/test_patch_dataset.py`.
+  - **Cobertura de patches** (38 tiles válidos, patch 64/stride 32): Veg 78,1%,
+    Past 57,1%, Agri 35,0%, Solo **10,4%**, Urbano **13,1%**, Água **10,5%**
+    (antes: 4,1/5,3/3,8). O relatório `dataset_report.json` traz
+    `patch_coverage` por tile e agregado.
+  - **Distribuição de pixels (38 tiles, 23,7M válidos):** Veg 37,8%, Past 28,0%,
+    Agri 14,1%, Solo **5,2%**, Urbano **10,0%**, Água **4,9%** (antes:
+    44,4/34,9/17,9/0,3/2,0/0,5).
   - Notebook Colab: `notebooks/04-unet-training-colab.ipynb` (checkpoints no Drive).
   - Pacote de upload: `data/colab_upload/` (repo + tiles + notebook + checksums).
   - **Treinada no Colab T4 (08/11/2026)**: `models/brazil_unet.pth` (124 MB,
     15 canais, 6 classes); early stop na época 67, melhor época ~55.
   - O loader do backend infere os canais do `state_dict` (15) e carrega o modelo.
-  - �reas menores que 64�64 px s�o aceitas: `_pad_to_grid` replica as bordas
-    at� 64�64 e recorta a sa�da. Se a U-Net falhar, o ensemble segue com RF/SVM.
-    Para resultados quantitativos, prefira �reas maiores que 640�640 m (~41 ha).
+  - �reas menores que 64�64 px s�o aceitas: `_pad_to_grid` replica as bordas
+    at� 64�64 e recorta a sa�da. Se a U-Net falhar, o ensemble segue com RF/SVM.
+    Para resultados quantitativos, prefira �reas maiores que 640�640 m (~41 ha).
   - **Correção do dataset (nov/2026):** NDVI/EVI agora têm `clamp(-1,1)`;
     `sanitize_features`/`sanitize_labels` removem NaN/Inf/outliers; tiles sem
     labels válidos são descartados. Dos 32 originais, **26 são válidos**:
@@ -48,6 +67,7 @@
     totalmente ignorados/sem diversidade.
   - Validação: `scripts/validate_unet_dataset.py` e `scripts/check_unet_tile.py`;
     relatório em `data/processed/unet_full/dataset_report.json`.
+  - Teste de cota do GEE (1 tile pequeno): `scripts/check_gee_quota.py`.
 - **Modelo regional SP** (`models/sp_rf.pkl`, `models/sp_svm.pkl`):
   - Treinado só nos polos Piracicaba, Ribeirão Preto e Barretos, com 15 features
     (9 originais + NDWI/MNDWI/SAVI/EVI/NBR/brilho).
@@ -65,8 +85,17 @@
   - Badge de cobertura (Brasil/Global), legenda com Água, confiança média
     rotulada como “não calibrada”.
   - Cultivo desabilitado fora do Brasil; U-Net só Sentinel-2/Brasil.
-- **Verificação**: `ruff` OK; **58 testes** passando; `npm run build` OK;
-  `npm run lint` 0 erros.
+  - **Busca por local**: aceita endereço (Nominatim/OSM via
+    `GET /api/geocode`) ou coordenadas `lat, lon`; o mapa voa até o ponto e
+    mostra um marcador. O backend faz proxy do Nominatim com `User-Agent`,
+    throttle (~1 req/s), cache em memória e **deduplicação** de resultados
+    (mesmo local a <10 km).
+  - **Limite de área**: aceita até `MAX_CLASSIFY_PIXELS` (6M px; ~60 mil ha
+    em 10 m). Acima disso retorna erro amigável. Downloads grandes usam
+    menos bandas por requisição (1 banda quando necessário) para não
+    estourar o limite de ~48 MB do `getDownloadURL`.
+- **Verificação**: `ruff` OK; **87 testes** passando; `npm run build` OK;
+  `npm run lint` 0 erros (1 warning pré-existente em `Results.tsx`).
 
 ### Métricas full (validação espacial honesta)
 | Domínio | Modelo | Acurácia | Kappa |
@@ -132,18 +161,45 @@
 - **Cautela:** Solo Exposto e Área Construída têm pouquíssimos pixels no tile
   de validação; o IoU/F1 dessas classes é instável. A U-Net é forte nas classes
   dominantes (0,1,2,5). O resultado de 0,8703 é de **um tile**; ainda falta
-  validação leave-one-tile-out nos 26 tiles.
+  validação leave-one-tile-out nos 38 tiles.
 - Comparação completa: `outputs/tile_model_comparison.json` e
   `outputs/unet_metrics.json`.
 
+### Retreino Etapa A + B (rebalanceamento offline + expansão dirigida)
+- **Problema original:** Solo (0,30%), Água (0,51%) e Urbano (2,04%) quase não
+  apareciam; no nível de patch, as raras estavam em apenas 4,1%/3,8%/5,3%.
+- **Etapa B concluída (cota GEE confirmada em 22/11/2026):** 12 tiles dirigidos
+  gerados — Ilha Solteira, Itaipu, Balbina e Manaus (água); Carajás,
+  Quadrilátero Ferrífero, Lençóis e Paracatu (solo); São Paulo, Campinas,
+  Goiânia e Belo Horizonte (urbano). Total: **38 tiles**, 23,7M px válidos.
+- **Código pronto:** amostragem centrada nas raras, `FocalLoss(γ=1.5)`, pesos
+  `1/sqrt(freq)` e validação multi-tile no notebook do Colab.
+- **Metas:** F1 Solo ≥ 0,40; F1 Urbano ≥ 0,35; F1 Água ≥ 0,80;
+  Veg/Past/Agri ≥ 0,75; acurácia ≥ 0,80; mIoU ≥ 0,55.
+- **Critério:** só promover o novo `brazil_unet.pth` se as metas forem atingidas
+  sem derrubar as classes dominantes.
+
+### Retreino #1 (resultado e ajuste)
+- **Resultado (6 tiles de validação):** acurácia 0,742 · mIoU 0,508 · macro F1
+  0,652. F1 Solo **0,672** (era 0,062) e F1 Urbano **0,731** (era 0,007), mas
+  **Água caiu para 0,240** (era 0,738) e acurácia ficou abaixo de 0,80.
+- **Diagnóstico:** a precisão de água desabou (14,5%) — 221 mil px de Solo
+  viraram Água. A confusão está em **Paracatu** (mineração de ouro escura,
+  NDVI≈0,24 vs água 0,17), que estava na validação mas **nunca foi vista no
+  treino** (treino de solo = Carajás ferro + Lençóis dunas), e em **Lençóis**
+  (dunas NDVI≈0,01 vs lagoas NDVI≈0,13, quase idênticas).
+- **Ajustes aplicados:** (1) `unet_solo_lencois` excluído do treino;
+  (2) `unet_solo_paracatu` movido da validação para o treino (valida em
+  `unet_solo_quadrilatero`); (3) `rare_patches_per_class` 150→100 e
+  `focal_gamma` 2.0→1.5 para reduzir o overpredict das raras.
+
 ### Pendente
-1. **Treinar a U-Net full no Colab (T4)**:
-   - Enviar ao Drive `data/processed/georural.zip` e
-     `data/processed/unet_dataset_full.zip` (459 MB).
-   - Rodar `notebooks/04-unet-training-colab.ipynb` (32 tiles, augmentation,
-     checkpoint no Drive).
-   - Baixar `brazil_unet.pth` e colocar em `models/`; o app passa a incluí-la
-     no ensemble.
+1. **Rodar o retreino #2 no Colab (T4)**:
+   - Substituir no Drive apenas o `georural.zip` (e o notebook); o
+     `unet_dataset_full.zip` **não mudou**.
+   - Apagar `brazil_unet*.pth` antigos; rodar o notebook (célula de setup
+     re-extrai o repositório sempre).
+   - Baixar `brazil_unet.pth` e colocar em `models/`; o app passa a usá-lo.
 2. Opcional: encoder pré-treinado (SSL4EO-S12/Prithvi) para a U-Net.
 3. Opcional: features multi-temporais para tentar superar o platô do LORO.
 
@@ -168,8 +224,9 @@ python notebooks/11-calibration-report.py --csv data/samples/full/brazil_samples
 python notebooks/11-calibration-report.py --csv data/samples/full/brazil_samples.csv --prefix brazil --group-strategy auto --no-local-indices --output-dir outputs/v2/calibration
 python notebooks/12-sp-raster-eval.py --holdout-region piracicaba --output-dir outputs/v2/sp
 
-# U-Net (32 tiles) e Colab
+# U-Net (38 tiles) e Colab
 python src/gee/build_unet_dataset.py --regions all --tiles-per-region 4 --tile-size 0.08 --out data/processed/unet_full --year 2023 --start 2023-01-01 --end 2023-12-31 --skip-existing
+python src/gee/build_unet_dataset.py --regions unet_agua_ilha_solteira unet_agua_itaipu unet_agua_balbina unet_agua_manaus unet_solo_carajas unet_solo_quadrilatero unet_solo_lencois unet_solo_paracatu unet_urbano_sao_paulo unet_urbano_campinas unet_urbano_goiania unet_urbano_belo_horizonte --tiles-per-region 1 --out data/processed/unet_full --year 2023 --start 2023-01-01 --end 2023-12-31 --skip-existing
 
 # App
 uvicorn backend.app.main:app --reload

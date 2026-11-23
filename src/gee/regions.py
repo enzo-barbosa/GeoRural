@@ -123,6 +123,63 @@ UNET_REGIONS: list[Region] = [
     ),
 ]
 
+# Etapa B: tiles dirigidos para as classes raras (água, solo exposto e urbano).
+# São usados explicitamente pelo nome; `--regions all` continua gerando só os
+# 8 biomas acima.
+UNET_EXPANSION_REGIONS: list[Region] = [
+    # Água: reservatórios e grandes rios.
+    Region(
+        "unet_agua_ilha_solteira", "brazil", "Cerrado", "Brazil",
+        (-51.38, -20.41, -51.32, -20.35),
+    ),
+    Region(
+        "unet_agua_itaipu", "brazil", "Mata Atlântica", "Brazil",
+        (-54.61, -25.43, -54.55, -25.37),
+    ),
+    Region(
+        "unet_agua_balbina", "brazil", "Amazônia", "Brazil",
+        (-59.48, -1.93, -59.42, -1.87),
+    ),
+    Region(
+        "unet_agua_manaus", "brazil", "Amazônia", "Brazil",
+        (-59.98, -3.18, -59.92, -3.12),
+    ),
+    # Solo exposto: mineração e dunas (estáveis ao longo do ano).
+    Region(
+        "unet_solo_carajas", "brazil", "Amazônia", "Brazil",
+        (-50.20, -6.09, -50.14, -6.03),
+    ),
+    Region(
+        "unet_solo_quadrilatero", "brazil", "Mata Atlântica", "Brazil",
+        (-43.28, -19.66, -43.22, -19.60),
+    ),
+    Region(
+        "unet_solo_lencois", "brazil", "Cerrado", "Brazil",
+        (-43.16, -2.55, -43.10, -2.49),
+    ),
+    Region(
+        "unet_solo_paracatu", "brazil", "Cerrado", "Brazil",
+        (-46.93, -17.23, -46.87, -17.17),
+    ),
+    # Área construída: centros urbanos densos.
+    Region(
+        "unet_urbano_sao_paulo", "brazil", "Mata Atlântica", "Brazil",
+        (-46.66, -23.58, -46.60, -23.52),
+    ),
+    Region(
+        "unet_urbano_campinas", "brazil", "Mata Atlântica", "Brazil",
+        (-47.09, -22.93, -47.03, -22.87),
+    ),
+    Region(
+        "unet_urbano_goiania", "brazil", "Cerrado", "Brazil",
+        (-49.28, -16.71, -49.22, -16.65),
+    ),
+    Region(
+        "unet_urbano_belo_horizonte", "brazil", "Mata Atlântica", "Brazil",
+        (-43.97, -19.95, -43.91, -19.89),
+    ),
+]
+
 GLOBAL_REGIONS: list[Region] = [
     Region(
         "us_corn_belt", "global", "Corn Belt", "United States",
@@ -198,7 +255,12 @@ def list_regions(domain: str) -> list[Region]:
 
 def get_region(name: str) -> Region:
     """Busca uma região pelo nome em todos os conjuntos."""
-    for region in BRAZIL_REGIONS + UNET_REGIONS + GLOBAL_REGIONS:
+    for region in (
+        BRAZIL_REGIONS
+        + UNET_REGIONS
+        + UNET_EXPANSION_REGIONS
+        + GLOBAL_REGIONS
+    ):
         if region.name == name:
             return region
     raise KeyError(f"Região desconhecida: {name}")
@@ -252,13 +314,14 @@ def resolve_unet_regions(
     if not names or names == ["all"]:
         selected = UNET_REGIONS
     else:
+        known = {r.name for r in UNET_REGIONS + UNET_EXPANSION_REGIONS}
         selected = []
         for name in names:
             region = get_region(name)
-            if region.name not in {r.name for r in UNET_REGIONS}:
+            if region.name not in known:
                 raise ValueError(
                     f"{name} não é um tile de U-Net. Use: "
-                    f"{[r.name for r in UNET_REGIONS]}"
+                    f"{sorted(known)}"
                 )
             selected.append(region)
 

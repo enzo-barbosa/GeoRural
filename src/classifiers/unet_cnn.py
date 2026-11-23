@@ -2,11 +2,13 @@
 
 import glob
 import os
+from collections.abc import Iterable
 
 import numpy as np
 import torch
 from sklearn.metrics import confusion_matrix
 from torch import nn, optim
+from torch.nn import functional as F
 from torch.utils.data import (
     DataLoader,
     Dataset,
@@ -305,24 +307,37 @@ class PatchDataset(Dataset):
     def __init__(
         self,
         tiles: dict[str, tuple[np.ndarray, np.ndarray]],
-        val_tile: str,
+        val_tile: str | Iterable[str],
         split: str = "train",
         patch_size: int = 64,
         stride: int = 32,
         include_indices: bool = True,
         min_valid_fraction: float = 0.01,
         min_classes: int = 2,
+        rare_classes: tuple[int, ...] = (3, 4, 5),
+        rare_patches_per_class: int = 0,
+        rare_min_fraction: float = 0.01,
+        seed: int = 42,
     ):
-        if val_tile not in tiles:
-            raise KeyError(f"Tile de validação desconhecido: {val_tile}")
+        val_tiles = {val_tile} if isinstance(val_tile, str) else set(val_tile)
+        unknown = val_tiles - set(tiles)
+        if unknown:
+            raise KeyError(
+                f"Tiles de validação desconhecidos: {sorted(unknown)}"
+            )
 
         self.tiles = tiles
+        self.val_tiles = val_tiles
         self.patch_size = patch_size
         self.include_indices = include_indices
         self.samples: list[tuple[str, int, int]] = []
+        self.rare_classes = rare_classes
+        self.rare_patches_per_class = rare_patches_per_class
+        self.rare_min_fraction = rare_min_fraction
+        self.rng = np.random.default_rng(seed)
 
         for name, (image, labels) in tiles.items():
-            is_val = name == val_tile
+            is_val = name in val_tiles
             if (split == "val") != is_val:
                 continue
 
@@ -347,12 +362,73 @@ class PatchDataset(Dataset):
                 continue
 
             height, width = image.shape[:2]
-            for y in range(0, height - patch_size + 1, stride):
-                for x in range(0, width - patch_size + 1, stride):
-                    self.samples.append((name, y, x))
+            grid = [
+                (name, y, x)
+                for y in range(0, height - patch_size + 1, stride)
+                for x in range(0, width - patch_size + 1, stride)
+            ]
+            self.samples.extend(grid)
+
+            if split == "train" and rare_patches_per_class > 0:
+                existing = {(y, x) for _, y, x in grid}
+                self.samples.extend(
+                    self._rare_samples(
+                        name, labels, height, width, existing
+                    )
+                )
 
         if not self.samples:
             raise ValueError(f"Split '{split}' sem patches.")
+
+    def _rare_samples(
+        self,
+        name: str,
+        labels: np.ndarray,
+        height: int,
+        width: int,
+        existing: set[tuple[int, int]],
+    ) -> list[tuple[str, int, int]]:
+        """Patches centrados em pixels das classes raras."""
+        if height < self.patch_size or width < self.patch_size:
+            return []
+
+        samples: list[tuple[str, int, int]] = []
+        for class_id in self.rare_classes:
+            coords = np.argwhere(labels == class_id)
+            if coords.size == 0:
+                continue
+            self.rng.shuffle(coords)
+
+            added = 0
+            for center_y, center_x in coords:
+                if added >= self.rare_patches_per_class:
+                    break
+                y = int(
+                    np.clip(
+                        center_y - self.patch_size // 2,
+                        0,
+                        height - self.patch_size,
+                    )
+                )
+                x = int(
+                    np.clip(
+                        center_x - self.patch_size // 2,
+                        0,
+                        width - self.patch_size,
+                    )
+                )
+                if (y, x) in existing:
+                    continue
+                patch = labels[
+                    y : y + self.patch_size, x : x + self.patch_size
+                ]
+                fraction = float((patch == class_id).mean())
+                if fraction < self.rare_min_fraction:
+                    continue
+                existing.add((y, x))
+                samples.append((name, y, x))
+                added += 1
+        return samples
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -371,8 +447,14 @@ class PatchDataset(Dataset):
             torch.from_numpy(label.astype(np.int64)),
         )
 
-    def class_weights(self, ignore_index: int = IGNORE_LABEL) -> np.ndarray:
-        """Pesos inversos à frequência para CrossEntropyLoss."""
+    def class_weights(
+        self, ignore_index: int = IGNORE_LABEL, exponent: float = 1.0
+    ) -> np.ndarray:
+        """Pesos inversos à frequência, suavizados por ``exponent``.
+
+        ``exponent=1`` é o inverso exato; valores menores (ex.: 0,5) reduzem
+        o upweight das classes raras e estabilizam o treino.
+        """
         counts = np.zeros(NUM_CLASSES, dtype=np.float64)
         for name, _y, _x in self.samples:
             _, labels = self.tiles[name]
@@ -384,10 +466,17 @@ class PatchDataset(Dataset):
                 patch[valid].astype(int).ravel(), minlength=NUM_CLASSES
             )[:NUM_CLASSES]
         counts[counts == 0] = 1.0
-        return counts.sum() / (counts * len(counts))
+        weights = (counts.sum() / (counts * len(counts))) ** exponent
+        return weights / weights.mean()
 
     def sample_weights(self, ignore_index: int = IGNORE_LABEL) -> np.ndarray:
-        """Peso por patch para WeightedRandomSampler."""
+        """Peso por patch para WeightedRandomSampler.
+
+        Patches sem nenhum pixel válido recebem peso ``0`` para nunca serem
+        amostrados. Os pesos inversos são normalizados para média ``1`` entre
+        os patches válidos, evitando a escala de ``1e-8`` que fazia o sampler
+        escolher apenas patches vazios (100% ``255``).
+        """
         counts = np.zeros(NUM_CLASSES, dtype=np.float64)
         for name, _y, _x in self.samples:
             _, labels = self.tiles[name]
@@ -399,8 +488,9 @@ class PatchDataset(Dataset):
                 patch[valid].astype(int).ravel(), minlength=NUM_CLASSES
             )[:NUM_CLASSES]
         inverse = 1.0 / (counts + 1.0)
+        inverse = inverse / inverse.mean()
 
-        weights = np.ones(len(self.samples), dtype=np.float64)
+        weights = np.zeros(len(self.samples), dtype=np.float64)
         for index, (name, _y, _x) in enumerate(self.samples):
             _, labels = self.tiles[name]
             patch = labels[
@@ -409,19 +499,32 @@ class PatchDataset(Dataset):
             valid = patch != ignore_index
             if valid.any():
                 weights[index] = float(inverse[patch[valid]].mean())
+
+        non_empty = weights > 0
+        if non_empty.any():
+            weights[non_empty] /= weights[non_empty].mean()
         return weights
 
 
 def make_patch_datasets(
     tiles: dict[str, tuple[np.ndarray, np.ndarray]],
-    val_tile: str,
+    val_tile: str | Iterable[str],
     patch_size: int = 64,
     stride: int = 32,
     include_indices: bool = True,
     min_valid_fraction: float = 0.01,
     min_classes: int = 2,
+    rare_classes: tuple[int, ...] = (3, 4, 5),
+    rare_patches_per_class: int = 0,
+    rare_min_fraction: float = 0.01,
+    seed: int = 42,
 ) -> tuple[PatchDataset, PatchDataset]:
-    """Cria datasets de treino/validação sem carregar todos os patches."""
+    """Cria datasets de treino/validação sem carregar todos os patches.
+
+    ``val_tile`` aceita um nome ou uma lista de tiles de validação. Para o
+    treino, ``rare_patches_per_class > 0`` adiciona patches centrados nas
+    classes raras (Solo Exposto, Área Construída e Água por padrão).
+    """
     train = PatchDataset(
         tiles,
         val_tile,
@@ -431,6 +534,10 @@ def make_patch_datasets(
         include_indices=include_indices,
         min_valid_fraction=min_valid_fraction,
         min_classes=min_classes,
+        rare_classes=rare_classes,
+        rare_patches_per_class=rare_patches_per_class,
+        rare_min_fraction=rare_min_fraction,
+        seed=seed,
     )
     val = PatchDataset(
         tiles,
@@ -441,8 +548,44 @@ def make_patch_datasets(
         include_indices=include_indices,
         min_valid_fraction=min_valid_fraction,
         min_classes=min_classes,
+        seed=seed,
     )
     return train, val
+
+
+class FocalLoss(nn.Module):
+    """Focal loss multiclasse, com pesos opcionais por classe.
+
+    Reduz o peso dos pixels fáceis e concentra o gradiente nos difíceis,
+    o que ajuda classes raras sem ignorar completamente as dominantes.
+    """
+
+    def __init__(
+        self,
+        weight: torch.Tensor | None = None,
+        gamma: float = 2.0,
+        ignore_index: int = IGNORE_LABEL,
+    ):
+        super().__init__()
+        self.weight = weight
+        self.gamma = gamma
+        self.ignore_index = ignore_index
+
+    def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        valid = target != self.ignore_index
+        target_safe = target.clone()
+        target_safe[~valid] = 0
+
+        log_prob = F.log_softmax(logits, dim=1)
+        log_pt = log_prob.gather(1, target_safe.unsqueeze(1)).squeeze(1)
+        pt = log_pt.exp()
+
+        loss = (1.0 - pt) ** self.gamma * (-log_pt)
+        if self.weight is not None:
+            loss = loss * self.weight[target_safe]
+        loss = loss[valid]
+
+        return loss.mean() if loss.numel() else logits.sum() * 0.0
 
 
 def compile_model(
@@ -451,6 +594,7 @@ def compile_model(
     device: str | None = None,
     class_weights: np.ndarray | None = None,
     ignore_index: int = IGNORE_LABEL,
+    focal_gamma: float | None = None,
 ):
     """Compila o modelo com otimizador Adam e loss apropriada.
 
@@ -459,6 +603,9 @@ def compile_model(
         learning_rate: Taxa de aprendizado
         device: Dispositivo ('cuda' ou 'cpu')
         class_weights: Pesos por classe (para classes desbalanceadas)
+        ignore_index: Rótulo ignorado (255)
+        focal_gamma: Se informado, usa FocalLoss com esse gamma em vez de
+            CrossEntropyLoss.
 
     Returns:
         Modelo compilado, optimizer, criterion
@@ -469,10 +616,17 @@ def compile_model(
     model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    weights = None
     if class_weights is not None:
-        weights = torch.tensor(class_weights, dtype=torch.float32)
+        weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
+
+    if focal_gamma is not None and focal_gamma > 0:
+        criterion = FocalLoss(
+            weight=weights, gamma=focal_gamma, ignore_index=ignore_index
+        )
+    elif weights is not None:
         criterion = nn.CrossEntropyLoss(
-            weight=weights.to(device), ignore_index=ignore_index
+            weight=weights, ignore_index=ignore_index
         )
     else:
         criterion = nn.CrossEntropyLoss(ignore_index=ignore_index)
@@ -486,18 +640,27 @@ def compile_model(
 def _sample_weights(
     labels: np.ndarray, num_classes: int = NUM_CLASSES, ignore_index: int = IGNORE_LABEL
 ) -> np.ndarray:
-    """Peso por patch para amostragem balanceada de classes raras."""
+    """Peso por patch para amostragem balanceada de classes raras.
+
+    Patches sem pixels válidos recebem peso ``0`` e os pesos inversos são
+    normalizados para média ``1`` entre os patches válidos.
+    """
     valid = labels != ignore_index
     counts = np.bincount(
         labels[valid].astype(int).ravel(), minlength=num_classes
     )[:num_classes].astype(float)
     inverse = 1.0 / (counts + 1.0)
+    inverse = inverse / inverse.mean()
 
-    weights = np.ones(len(labels), dtype=np.float64)
+    weights = np.zeros(len(labels), dtype=np.float64)
     for index, label in enumerate(labels):
         mask = label != ignore_index
         if mask.any():
             weights[index] = float(inverse[label[mask]].mean())
+
+    non_empty = weights > 0
+    if non_empty.any():
+        weights[non_empty] /= weights[non_empty].mean()
     return weights
 
 
@@ -589,6 +752,7 @@ def train_unet(
     checkpoint_path: str | None = None,
     resume: bool = False,
     checkpoint_every: int = 5,
+    focal_gamma: float | None = None,
 ):
     """Treina a U-Net com augmentation, balanceamento e checkpoint.
 
@@ -608,6 +772,7 @@ def train_unet(
         patience: Épocas sem melhora para early stopping (0 = desliga).
         checkpoint_path: Caminho do checkpoint "last" (retomada).
         resume: Retoma do checkpoint se existir.
+        focal_gamma: Se informado, usa FocalLoss com esse gamma.
 
     Returns:
         Histórico com perdas, acurácias e métricas finais (IoU/F1).
@@ -619,6 +784,7 @@ def train_unet(
         device,
         class_weights=class_weights,
         ignore_index=ignore_index,
+        focal_gamma=focal_gamma,
     )
 
     if isinstance(X_train, Dataset):
@@ -638,6 +804,11 @@ def train_unet(
         else:
             weights = _sample_weights(
                 y_train.numpy(), NUM_CLASSES, ignore_index
+            )
+        if float(weights.sum()) <= 0:
+            raise ValueError(
+                "sample_weights retornou apenas zeros: nenhum patch de "
+                "treino tem pixels válidos. Verifique o dataset."
             )
         sampler = WeightedRandomSampler(
             torch.DoubleTensor(weights),
@@ -708,6 +879,13 @@ def train_unet(
             _, predicted = torch.max(outputs.data, 1)
             train_total += valid_count
             train_correct += ((predicted == batch_y) & valid).sum().item()
+
+        if train_total == 0:
+            raise RuntimeError(
+                "Época sem pixels válidos no treino: todos os patches "
+                "vieram 100% com rótulo ignorado (255). Verifique o "
+                "dataset e o balanceamento (sample_weights)."
+            )
 
         train_loss /= max(train_total, 1)
         train_acc = train_correct / max(train_total, 1)

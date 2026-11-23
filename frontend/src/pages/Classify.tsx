@@ -13,7 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Select, type SelectOption } from '@/components/ui/select'
-import { MapView } from '@/components/map/MapView'
+import { MapView, type MapFocus } from '@/components/map/MapView'
+import {
+  LocationSearch,
+  type LocationSelection,
+} from '@/components/map/LocationSearch'
 import { useClassify, useModelsStatus } from '@/hooks/useApi'
 import { classifyApi } from '@/services/api'
 import type { ClassifierName, ClassifyRequest } from '@/types/api'
@@ -39,6 +43,8 @@ const CLASS_LEGEND = [
 export function Classify() {
   const navigate = useNavigate()
   const [polygon, setPolygon] = useState<number[][][] | null>(null)
+  const [focus, setFocus] = useState<MapFocus | null>(null)
+  const [marker, setMarker] = useState<[number, number] | null>(null)
   const [satellite, setSatellite] = useState<'sentinel2' | 'landsat8'>('sentinel2')
   const [classifier, setClassifier] = useState<ClassifierName>('auto')
   const [coverage, setCoverage] = useState<'brazil' | 'global' | null>(null)
@@ -76,6 +82,22 @@ export function Classify() {
     setCoverage(null)
     setIncludeCrop(true)
   }, [])
+
+  const handleLocationSelect = useCallback(
+    (selection: LocationSelection) => {
+      setFocus({
+        lat: selection.lat,
+        lon: selection.lon,
+        bbox: selection.bbox ?? null,
+        zoom: selection.bbox ? undefined : 14,
+        id: Date.now(),
+      })
+      setMarker([selection.lat, selection.lon])
+      // Ao buscar um novo local, começa uma área nova.
+      handlePolygonRemove()
+    },
+    [handlePolygonRemove]
+  )
 
   const hasModels =
     modelsStatus?.brazil_rf ||
@@ -163,11 +185,14 @@ export function Classify() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                <LocationSearch onSelect={handleLocationSelect} />
                 <MapView
                   onDraw={handlePolygonDraw}
                   onRemove={handlePolygonRemove}
                   initialPolygon={polygon}
                   disabled={classifyMutation.isPending}
+                  focus={focus}
+                  marker={marker}
                 />
                 {polygon ? (
                   <div className="mt-4 flex items-center gap-2 text-green-700 bg-green-50 p-3 rounded-lg">
