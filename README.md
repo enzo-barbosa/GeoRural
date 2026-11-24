@@ -246,6 +246,12 @@ georural/
 └── README.md
 ```
 
+## Contribuindo
+
+Leia o [`CONTRIBUTING.md`](CONTRIBUTING.md). O fluxo é **um PR por vez**: abra o
+PR, espere todos os checks verdes, o dono revisa e faz o squash merge, e só
+depois o próximo PR é iniciado. PRs empilhados não são usados.
+
 ## Autores
 
 - Arthur Zocal Ribeiro da Silva
