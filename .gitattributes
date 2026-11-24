@@ -1,0 +1,27 @@
+# Normaliza quebras de linha entre Linux, macOS e Windows.
+* text=auto eol=lf
+
+# Scripts que o Windows espera em CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Não trate artefatos binários como texto.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tif binary
+*.tiff binary
+*.npy binary
+*.npz binary
+*.pkl binary
+*.joblib binary
+*.pth binary
+*.pt binary
+*.onnx binary
