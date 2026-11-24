@@ -73,17 +73,17 @@ Em **Settings → Code security and analysis**:
 
 ## 5. Release de modelos
 
-Depois de criar a release `models-v1` (PR I5):
+Publique a release `models-v1` com o script (mais seguro que o comando manual):
 
 ```bash
-gh release create models-v1 models/*.pkl models/*.pth \
-  --title "Modelos v1" \
-  --notes "Modelos treinados (RF, SVM, U-Net e cultivo) usados pelo app."
+uv run python scripts/publish_models.py --dry-run
+uv run python scripts/publish_models.py --upload --update-manifest
 ```
 
 O `models.lock.json` aponta para
-`https://github.com/enzo-barbosa/GeoRural/releases/download/models-v1/<arquivo>`.
-Preencha os `sha256` no manifesto depois do upload (o PR I5 faz isso).
+`https://github.com/enzo-barbosa/GeoRural/releases/download/models-v1/<arquivo>`
+e já contém os SHA-256. O download (`scripts/download_models.py`) valida
+tamanho e hash; confira com `--check`.
 
 ## 6. Desenvolvimento local
 
@@ -106,7 +106,21 @@ gh pr create --fill
 # squash merge + delete branch
 ```
 
-## 8. Problemas comuns
+## 8. Regra de ouro: um PR por vez
+
+O desenvolvimento é **sequencial**, sem PRs empilhados:
+
+1. Abra **um PR** por tarefa.
+2. Espere **todos os checks verdes** (lint, test, frontend, windows, título e
+   CodeQL quando aplicável).
+3. O dono revisa e faz o **squash merge**.
+4. Atualize a `main` (`git switch main && git pull`) e só então abra o próximo.
+
+Valem também para PRs automáticos (Dependabot e Release Please): um por vez,
+CI verde e merge antes de seguir. Se um PR depende de outro, aguarde o merge e
+rebaseie a branch sobre a `main`; nunca abra em cima de uma branch não mergeada.
+
+## 9. Problemas comuns
 
 - **Check obrigatório não aparece**: ele só fica disponível depois de rodar ao
   menos uma vez. Abra um PR de teste.
