@@ -13,7 +13,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-GEE_PROJECT_ID = os.environ["GEE_PROJECT_ID"]
+
+def _project_id() -> str:
+    """Lê o ID do projeto do GEE sob demanda.
+
+    O valor não é lido no import para que módulos possam ser importados em
+    testes e no CI sem um ``.env`` configurado. O erro só aparece quando o
+    Earth Engine é realmente inicializado.
+    """
+    project_id = os.environ.get("GEE_PROJECT_ID", "").strip()
+    if not project_id:
+        raise RuntimeError(
+            "GEE_PROJECT_ID não configurado. Defina a variável no .env "
+            "ou no ambiente antes de usar o Earth Engine."
+        )
+    return project_id
 
 
 def initialize_gee():
@@ -22,6 +36,7 @@ def initialize_gee():
     Tenta Service Account primeiro (deploy cloud), depois
     autenticação interativa (execução local).
     """
+    project_id = _project_id()
     service_account_json = os.environ.get("GEE_SERVICE_ACCOUNT")
     service_account_email = os.environ.get("GEE_SERVICE_ACCOUNT_EMAIL")
 
@@ -30,13 +45,13 @@ def initialize_gee():
         credentials = ee.ServiceAccountCredentials(
             email=service_account_email, key=key_data
         )
-        ee.Initialize(credentials, project=GEE_PROJECT_ID)
+        ee.Initialize(credentials, project=project_id)
         print("GEE inicializado com Service Account")
     else:
         try:
-            ee.Initialize(project=GEE_PROJECT_ID)
+            ee.Initialize(project=project_id)
             print("GEE inicializado (credenciais existentes)")
         except ee.EEException:
             ee.Authenticate()
-            ee.Initialize(project=GEE_PROJECT_ID)
+            ee.Initialize(project=project_id)
             print("GEE autenticado e inicializado")
