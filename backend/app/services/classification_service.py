@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import ee
@@ -649,7 +649,7 @@ async def classify_area(
     postprocess: bool = True,
 ) -> dict:
     """Main classification pipeline."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     job_id = f"{stamp}_{uuid.uuid4().hex[:8]}"
 
     geometry = polygon_to_ee_geometry(polygon_coords)
