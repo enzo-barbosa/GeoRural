@@ -38,6 +38,28 @@ models/
 # Logs
 *.log
 
+# Testes e cobertura
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Banco local
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend
+node_modules/
+backend/frontend/
+
+# Variáveis de ambiente (o exemplo é versionado)
+.env.*
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db
