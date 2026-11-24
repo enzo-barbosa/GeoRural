@@ -60,6 +60,9 @@ backend/frontend/
 .env.*
 !.env.example
 
+# Credenciais locais do Earth Engine (quando usadas no Docker)
+.earthengine/
+
 # OS
 .DS_Store
 Thumbs.db
