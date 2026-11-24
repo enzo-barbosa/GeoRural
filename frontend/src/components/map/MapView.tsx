@@ -110,10 +110,12 @@ function DrawControl({ onDraw, onRemove, initialPolygon, disabled }: MapViewProp
     const ring = initialPolygon[0]
     if (!ring || ring.length < 3) return
 
-    const polygon = L.polygon(
-      ring.map(([lng, lat]) => [lat, lng]),
-      { color: '#2563eb', weight: 2, fillOpacity: 0.1 }
-    )
+    const latlngs: [number, number][] = ring.map(([lng, lat]) => [lat, lng])
+    const polygon = L.polygon(latlngs, {
+      color: '#2563eb',
+      weight: 2,
+      fillOpacity: 0.1,
+    })
     polygon.addTo(map)
     polygonRef.current = polygon
     map.fitBounds(polygon.getBounds())
