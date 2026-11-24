@@ -1,9 +1,11 @@
 # GeoRural
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![React](https://img.shields.io/badge/react-19-61dafb)
 ![PyTorch](https://img.shields.io/badge/pytorch-2.x-ee4c2c)
+[![CI](https://github.com/enzo-barbosa/GeoRural/actions/workflows/ci.yml/badge.svg)](https://github.com/enzo-barbosa/GeoRural/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/enzo-barbosa/GeoRural/actions/workflows/codeql.yml/badge.svg)](https://github.com/enzo-barbosa/GeoRural/actions/workflows/codeql.yml)
 
 Aplicação para classificação do uso e cobertura do solo em propriedades rurais utilizando imagens de satélite e aprendizado de máquina.
 
