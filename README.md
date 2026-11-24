@@ -21,18 +21,27 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 
 ## Requisitos
 
-- Python 3.10+
+- Python 3.12+ (o projeto usa 3.13 via `.python-version`; não precisa instalar manualmente, o `uv` baixa)
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 20+
 - Conta Google Earth Engine
-- GPU (recomendado para treinamento da CNN)
+- GPU apenas para treinar a CNN localmente (o fluxo oficial usa Google Colab)
 
 ## Instalação
 
 ```bash
-git clone https://github.com/SEU-USER/georural.git
-cd georural
-python -m venv .venv
-source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,backend]"
+git clone https://github.com/enzo-barbosa/GeoRural.git
+cd GeoRural
+uv sync --all-extras
+cp .env.example .env             # Windows: Copy-Item .env.example .env
+```
+
+Para rodar scripts e ferramentas dentro do ambiente gerenciado pelo `uv`:
+
+```bash
+uv run python -m pytest -q
+uv run ruff check src backend tests scripts
+uv run python src/gee/extract_samples_cli.py --help
 ```
 
 ## Configuração
