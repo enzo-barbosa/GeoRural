@@ -2,6 +2,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import path from 'path'
 
+// Dentro do Docker o backend é alcançado pelo nome do serviço (`backend`).
+// Fora dele, o padrão continua sendo localhost.
+const apiTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:8000'
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -18,15 +22,15 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
       '/outputs': {
-        target: 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://localhost:8000',
+        target: apiTarget,
         changeOrigin: true,
       },
     },

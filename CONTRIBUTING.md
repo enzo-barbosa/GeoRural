@@ -5,7 +5,7 @@ sistemas operacionais usados no projeto: Linux e Windows.
 
 ## Pré-requisitos
 
-- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (gerencia a versão do Python e as dependências)
 - Node.js 20+
 - Conta com acesso ao Google Earth Engine (a mesma conta do projeto)
 - Git
@@ -15,15 +15,15 @@ sistemas operacionais usados no projeto: Linux e Windows.
 ```bash
 git clone git@github.com:enzo-barbosa/GeoRural.git
 cd GeoRural
-python -m venv .venv
-source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,backend]"
+uv sync --all-extras
 cp .env.example .env             # Windows: Copy-Item .env.example .env
-earthengine authenticate
+uv run earthengine authenticate
 cd frontend && npm ci
 ```
 
-Preencha o `.env` com o `GEE_PROJECT_ID` do projeto. Nunca commite o `.env`.
+O `uv` lê o `.python-version` (3.13) e o `uv.lock`. Não é necessário criar o
+`.venv` manualmente. Preencha o `.env` com o `GEE_PROJECT_ID` do projeto. Nunca
+commite o `.env`.
 
 ## Branches
 
@@ -71,6 +71,29 @@ Exemplos de commits ruins:
 
 ## Pull Request
 
+### Um PR por vez
+
+O fluxo do projeto é sequencial. **Não abra o próximo PR antes do anterior ser
+mergeado.**
+
+1. Abra **um PR pequeno** por tarefa.
+2. Aguarde **todos os checks do CI ficarem verdes** (Ubuntu, Windows, frontend,
+   título e CodeQL quando aplicável).
+3. Avise o dono do repositório para revisar e mergear.
+4. Só depois do merge faça `git switch main && git pull` e comece a próxima
+   tarefa.
+
+Regras:
+
+- Ninguém mergeia o próprio PR (o dono usa o bypass de admin quando necessário).
+- Não empilhe PRs. Se uma tarefa depende de outra, espere o merge e rebaseie a
+  branch sobre a `main`.
+- Se o CI ficou vermelho, corrija no mesmo PR; não abra outro.
+- PRs de dependências (Dependabot) e de release (Release Please) também entram
+  nessa fila, um por vez.
+
+### Passos
+
 1. Faça push da branch:
    ```bash
    git push -u origin feat/nome-curto
@@ -81,15 +104,15 @@ Exemplos de commits ruins:
 3. Descreva o que mudou, como testar e anexe screenshots quando houver mudança
    de interface.
 4. Mantenha o PR pequeno. Quando possível, até ~400 linhas alteradas.
-5. O CI precisa passar (Ubuntu e Windows).
+5. O CI precisa passar por completo (Ubuntu e Windows).
 6. O merge só acontece após aprovação do code owner. O merge é **squash** e a
    branch é apagada automaticamente.
 
 Antes de abrir o PR:
 
 ```bash
-ruff check src backend tests scripts
-pytest -q
+uv run ruff check src backend tests scripts
+uv run pytest -q
 cd frontend && npm run lint && npm run build
 ```
 

@@ -1,0 +1,38 @@
+# Contexto do build Docker
+.git
+.gitignore
+.gitattributes
+.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+.coverage.*
+htmlcov
+coverage.xml
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+*.log
+
+# Dados e artefatos grandes (montados via volume)
+models/
+data/
+outputs/
+*.tif
+*.tiff
+*.zip
+*.pkl
+*.pth
+*.npy
+*.npz
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+backend/frontend/

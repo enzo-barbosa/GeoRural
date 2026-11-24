@@ -22,8 +22,8 @@
 ## Checklist
 
 - [ ] Título do PR segue Conventional Commits
-- [ ] `ruff check src backend tests scripts` passou
-- [ ] `pytest -q` passou
+- [ ] `uv run ruff check src backend tests scripts` passou
+- [ ] `uv run pytest -q` passou
 - [ ] `cd frontend && npm run lint && npm run build` passou
 - [ ] Não inclui `.env`, credenciais, modelos, dados ou `outputs/`
 - [ ] Documentação atualizada (quando necessário)
