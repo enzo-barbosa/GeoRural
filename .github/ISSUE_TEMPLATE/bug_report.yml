@@ -1,0 +1,52 @@
+name: Bug
+description: Reportar um comportamento inesperado
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar! Preencha os campos abaixo para facilitar a reprodução.
+  - type: textarea
+    id: description
+    attributes:
+      label: Descrição
+      description: O que aconteceu e o que você esperava que acontecesse?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Abrir a tela de classificação
+        2. Desenhar um polígono em ...
+        3. Clicar em ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / mensagem de erro
+      description: Cole o traceback ou a mensagem do navegador/backend.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Ambiente
+      options:
+        - Linux
+        - Windows
+        - Docker
+        - Outro
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão / commit
+      description: Saída de `git rev-parse --short HEAD`.
+    validations:
+      required: false
