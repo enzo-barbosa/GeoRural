@@ -1,6 +1,6 @@
 [project]
 name = "georural"
-version = "0.1.0"
+version = "0.2.0"
 description = "Geolocalização de propriedades rurais com uso de imagens de satélite e aprendizado de máquina"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
