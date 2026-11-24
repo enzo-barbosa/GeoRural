@@ -1,5 +1,10 @@
 # GeoRural
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![React](https://img.shields.io/badge/react-19-61dafb)
+![PyTorch](https://img.shields.io/badge/pytorch-2.x-ee4c2c)
+
 Aplicação para classificação do uso e cobertura do solo em propriedades rurais utilizando imagens de satélite e aprendizado de máquina.
 
 ## Funcionalidades
