@@ -105,7 +105,8 @@ docker compose -f compose.prod.yml up --build
 
 > Os modelos e `outputs/` são montados como volumes. O build da imagem não os
 > inclui. Sem a release `models-v1`, rode o app apenas com os modelos que você
-> já tem em `models/`.
+> já tem em `models/`. Detalhes de versões e publicação em
+> [`docs/MODELS.md`](docs/MODELS.md).
 
 ## Uso
 

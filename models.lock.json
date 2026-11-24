@@ -5,42 +5,42 @@
     {
       "name": "brazil_rf.pkl",
       "size": 1856435417,
-      "sha256": null
+      "sha256": "7274edb9466f9950726c62387a1caec689285f0f1842b69539f32f39df57755b"
     },
     {
       "name": "brazil_svm.pkl",
       "size": 1814005,
-      "sha256": null
+      "sha256": "144bfe50b3d7c944388beb18d6ee8b58b10e08cd6de36274f36545704acdeb19"
     },
     {
       "name": "brazil_unet.pth",
       "size": 124299303,
-      "sha256": null
+      "sha256": "1b9c7b8e9ee40337ffdde598dd02e04a3a961d0d7da1939127f06c579aa2f7e8"
     },
     {
       "name": "global_rf.pkl",
       "size": 496017113,
-      "sha256": null
+      "sha256": "1a1b024c46def6ceca4ef43d025175285b4d4f475a0da2b8e43017aacab9d284"
     },
     {
       "name": "global_svm.pkl",
       "size": 1706821,
-      "sha256": null
+      "sha256": "2d1939256507ee0c1ef9dcf9659ed9f47c4dd2ac9954ba351e51526910c3525e"
     },
     {
       "name": "sp_rf.pkl",
       "size": 410475993,
-      "sha256": null
+      "sha256": "d64eb2e26de9a326d11f7072fbd5c86acc00b6440c77e156688209b8ee30cf9a"
     },
     {
       "name": "sp_svm.pkl",
       "size": 1697973,
-      "sha256": null
+      "sha256": "1150909558a3246e941eb6327ff6c580668a5f4942288ae453f1cf7d3ade2694"
     },
     {
       "name": "crop_classifier.pkl",
       "size": 226546433,
-      "sha256": null
+      "sha256": "6abd4b4c8b20e13d835775ea3c0a7aeec1d6bb6ed21e8dafead6dc8c7684ee9c"
     }
   ]
 }
