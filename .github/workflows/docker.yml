@@ -1,0 +1,75 @@
+name: Docker
+
+on:
+  pull_request:
+    paths:
+      - "docker/**"
+      - "compose*.yml"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/docker.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - "compose*.yml"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "frontend/package.json"
+      - "frontend/package-lock.json"
+      - ".github/workflows/docker.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: docker/frontend.Dockerfile
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Validate compose files
+        run: |
+          cp .env.example .env
+          docker compose config > /dev/null
+          docker compose -f compose.prod.yml config > /dev/null
+
+      - name: Build production image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/app.Dockerfile
+          push: false
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
