@@ -3,7 +3,7 @@ name = "georural"
 version = "0.1.0"
 description = "Geolocalização de propriedades rurais com uso de imagens de satélite e aprendizado de máquina"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.15"
 license = {text = "MIT"}
 
 dependencies = [
@@ -37,6 +37,7 @@ dependencies = [
     # Utilidades
     "pandas>=2.1.0",
     "python-dotenv>=1.0.0",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "ruff>=0.1.0",
+    "pre-commit>=4.7.0",
 ]
 backend = [
     "fastapi>=0.109",
@@ -55,10 +57,28 @@ backend = [
     "httpx>=0.26",
 ]
 
+[tool.uv]
+# Instala sempre as versões vindas do lockfile e evita surpresas entre
+# Linux (desenvolvimento/Docker) e Windows (outro desenvolvedor).
+package = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 extend-exclude = ["notebooks/*.ipynb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: testes que exigem serviços externos (banco, rede)",
+    "gee: testes que exigem autenticação e cota do Google Earth Engine",
+]

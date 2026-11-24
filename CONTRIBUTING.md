@@ -5,7 +5,7 @@ sistemas operacionais usados no projeto: Linux e Windows.
 
 ## Pré-requisitos
 
-- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (gerencia a versão do Python e as dependências)
 - Node.js 20+
 - Conta com acesso ao Google Earth Engine (a mesma conta do projeto)
 - Git
@@ -15,15 +15,15 @@ sistemas operacionais usados no projeto: Linux e Windows.
 ```bash
 git clone git@github.com:enzo-barbosa/GeoRural.git
 cd GeoRural
-python -m venv .venv
-source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,backend]"
+uv sync --all-extras
 cp .env.example .env             # Windows: Copy-Item .env.example .env
-earthengine authenticate
+uv run earthengine authenticate
 cd frontend && npm ci
 ```
 
-Preencha o `.env` com o `GEE_PROJECT_ID` do projeto. Nunca commite o `.env`.
+O `uv` lê o `.python-version` (3.13) e o `uv.lock`. Não é necessário criar o
+`.venv` manualmente. Preencha o `.env` com o `GEE_PROJECT_ID` do projeto. Nunca
+commite o `.env`.
 
 ## Branches
 
@@ -88,8 +88,8 @@ Exemplos de commits ruins:
 Antes de abrir o PR:
 
 ```bash
-ruff check src backend tests scripts
-pytest -q
+uv run ruff check src backend tests scripts
+uv run pytest -q
 cd frontend && npm run lint && npm run build
 ```
 

@@ -1,0 +1,55 @@
+name: georural-prod
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-georural}
+      POSTGRES_USER: ${POSTGRES_USER:-georural}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-georural}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOME: /home/app
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-georural}:${POSTGRES_PASSWORD:-georural}@db:5432/${POSTGRES_DB:-georural}
+    volumes:
+      - ${GEE_CREDENTIALS_DIR:-./.earthengine}:/home/app/.config/earthengine
+      - ./models:/app/models
+      - ./outputs:/app/outputs
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/live', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata:

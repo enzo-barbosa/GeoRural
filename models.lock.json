@@ -1,0 +1,46 @@
+{
+  "release": "models-v1",
+  "base_url": "https://github.com/enzo-barbosa/GeoRural/releases/download/models-v1",
+  "files": [
+    {
+      "name": "brazil_rf.pkl",
+      "size": 1856435417,
+      "sha256": null
+    },
+    {
+      "name": "brazil_svm.pkl",
+      "size": 1814005,
+      "sha256": null
+    },
+    {
+      "name": "brazil_unet.pth",
+      "size": 124299303,
+      "sha256": null
+    },
+    {
+      "name": "global_rf.pkl",
+      "size": 496017113,
+      "sha256": null
+    },
+    {
+      "name": "global_svm.pkl",
+      "size": 1706821,
+      "sha256": null
+    },
+    {
+      "name": "sp_rf.pkl",
+      "size": 410475993,
+      "sha256": null
+    },
+    {
+      "name": "sp_svm.pkl",
+      "size": 1697973,
+      "sha256": null
+    },
+    {
+      "name": "crop_classifier.pkl",
+      "size": 226546433,
+      "sha256": null
+    }
+  ]
+}

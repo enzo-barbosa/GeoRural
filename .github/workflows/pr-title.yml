@@ -1,0 +1,35 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    name: conventional-title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            chore
+            build
+            ci
+            revert
+          requireScope: false
+          subjectPattern: ^[A-Za-zÀ-ÿ0-9].+$
+          subjectPatternError: |
+            O título do PR precisa começar com um tipo Conventional Commits
+            (ex.: "feat: salvar áreas no banco"). Como o merge é squash, o
+            título vira a mensagem do commit na main.

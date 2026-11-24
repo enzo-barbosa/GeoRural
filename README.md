@@ -1,9 +1,11 @@
 # GeoRural
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![React](https://img.shields.io/badge/react-19-61dafb)
 ![PyTorch](https://img.shields.io/badge/pytorch-2.x-ee4c2c)
+[![CI](https://github.com/enzo-barbosa/GeoRural/actions/workflows/ci.yml/badge.svg)](https://github.com/enzo-barbosa/GeoRural/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/enzo-barbosa/GeoRural/actions/workflows/codeql.yml/badge.svg)](https://github.com/enzo-barbosa/GeoRural/actions/workflows/codeql.yml)
 
 Aplicação para classificação do uso e cobertura do solo em propriedades rurais utilizando imagens de satélite e aprendizado de máquina.
 
@@ -21,18 +23,27 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 
 ## Requisitos
 
-- Python 3.10+
+- Python 3.12+ (o projeto usa 3.13 via `.python-version`; não precisa instalar manualmente, o `uv` baixa)
+- [uv](https://docs.astral.sh/uv/)
+- Node.js 20+
 - Conta Google Earth Engine
-- GPU (recomendado para treinamento da CNN)
+- GPU apenas para treinar a CNN localmente (o fluxo oficial usa Google Colab)
 
 ## Instalação
 
 ```bash
-git clone https://github.com/SEU-USER/georural.git
-cd georural
-python -m venv .venv
-source .venv/bin/activate        # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,backend]"
+git clone https://github.com/enzo-barbosa/GeoRural.git
+cd GeoRural
+uv sync --all-extras
+cp .env.example .env             # Windows: Copy-Item .env.example .env
+```
+
+Para rodar scripts e ferramentas dentro do ambiente gerenciado pelo `uv`:
+
+```bash
+uv run python -m pytest -q
+uv run ruff check src backend tests scripts
+uv run python src/gee/extract_samples_cli.py --help
 ```
 
 ## Configuração
@@ -47,6 +58,54 @@ pip install -e ".[dev,backend]"
    ```
    GEE_PROJECT_ID=georural-project
    ```
+
+## Rodando com Docker (recomendado)
+
+O ambiente completo (Postgres + backend + frontend) sobe com Docker Compose e
+funciona igual no Linux e no Windows.
+
+```bash
+# 1. Configure as variáveis
+cp .env.example .env             # Windows: Copy-Item .env.example .env
+
+# 2. Autentique o Earth Engine no host (uma vez por máquina)
+uv run earthengine authenticate
+
+# 3. Baixe os modelos da release
+docker compose --profile tools run --rm download-models
+# ou: uv run python scripts/dev.py models
+
+# 4. Suba tudo
+docker compose up --build
+# ou: uv run python scripts/dev.py up
+```
+
+- Frontend: http://localhost:5173
+- API: http://localhost:8000
+- Health (sem GEE): http://localhost:8000/api/health/live
+- Postgres: `localhost:5434`
+
+O `scripts/dev.py` detecta as credenciais do GEE e expõe atalhos:
+
+```bash
+uv run python scripts/dev.py up -d      # sobe em background
+uv run python scripts/dev.py logs backend
+uv run python scripts/dev.py test       # pytest dentro do container
+uv run python scripts/dev.py lint       # ruff dentro do container
+uv run python scripts/dev.py down       # derruba
+uv run python scripts/dev.py rebuild    # reconstrói imagens e containers
+```
+
+Para produção local (FastAPI servindo o build do React):
+
+```bash
+docker compose -f compose.prod.yml up --build
+# acesse http://localhost:8000
+```
+
+> Os modelos e `outputs/` são montados como volumes. O build da imagem não os
+> inclui. Sem a release `models-v1`, rode o app apenas com os modelos que você
+> já tem em `models/`.
 
 ## Uso
 
