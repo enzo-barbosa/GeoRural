@@ -6,7 +6,7 @@ para permitir retomada. Os CSVs parciais são concatenados no final.
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -202,7 +202,7 @@ def update_manifest(path: str, entry: dict) -> None:
     key = f"{entry.get('domain')}:{entry.get('region_id')}:{entry.get('year')}"
     data[key] = {
         **entry,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

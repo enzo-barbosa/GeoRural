@@ -183,5 +183,15 @@ class CoverageResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response."""
 
-    status: Literal["healthy"] = "healthy"
+    status: Literal["healthy", "degraded"] = "healthy"
     gee_initialized: bool
+    rss_mb: float | None = None
+    system_available_mb: float | None = None
+
+
+class LivenessResponse(BaseModel):
+    """Resposta do check de liveness (não depende do GEE)."""
+
+    status: Literal["ok"] = "ok"
+    rss_mb: float
+    system_available_mb: float
