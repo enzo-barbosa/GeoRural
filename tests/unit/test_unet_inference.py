@@ -50,6 +50,21 @@ def test_predict_unet_proba_tiny_image(model):
     np.testing.assert_allclose(proba.sum(axis=-1), 1.0, atol=1e-5)
 
 
+def test_batched_inference_matches_single_patch(model):
+    image = np.random.default_rng(2).random((48, 96, 15), dtype=np.float32)
+    single = predict_unet_proba(
+        model, image, patch_size=64, stride=32, batch_size=1
+    )
+    batched = predict_unet_proba(
+        model, image, patch_size=64, stride=32, batch_size=8
+    )
+
+    np.testing.assert_allclose(single, batched, atol=1e-6, rtol=1e-5)
+    np.testing.assert_array_equal(
+        np.argmax(single, axis=-1), np.argmax(batched, axis=-1)
+    )
+
+
 class _DummyClassifier:
     n_features_in_ = 9
     classes_ = np.array([0, 1])

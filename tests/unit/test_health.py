@@ -9,6 +9,7 @@ def test_memory_snapshot_has_expected_keys():
     snapshot = memory_snapshot()
     assert snapshot["rss_mb"] > 0
     assert snapshot["system_available_mb"] > 0
+    assert "peak_rss_mb" in snapshot
 
 
 def test_liveness_does_not_depend_on_gee():
