@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 import { MapPin, Cpu, Layers, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { UserMenu } from '@/components/UserMenu'
+import { useAuth } from '@/contexts/AuthContext'
 
 const features = [
   {
@@ -39,6 +41,8 @@ const classes = [
 ]
 
 export function Home() {
+  const { user } = useAuth()
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200">
@@ -55,6 +59,18 @@ export function Home() {
               <Link to="/results">
                 <Button variant="ghost">Resultados</Button>
               </Link>
+              {user ? (
+                <UserMenu />
+              ) : (
+                <>
+                  <Link to="/login">
+                    <Button variant="ghost">Entrar</Button>
+                  </Link>
+                  <Link to="/register">
+                    <Button>Criar conta</Button>
+                  </Link>
+                </>
+              )}
             </nav>
           </div>
         </div>

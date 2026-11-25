@@ -31,6 +31,13 @@ class Settings(BaseSettings):
         "postgresql+psycopg://georural:georural@localhost:5434/georural"
     )
 
+    # Autenticação
+    JWT_SECRET_KEY: str = "dev-insecure-secret-change-me-please-32-bytes"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7
+    AUTH_COOKIE_NAME: str = "georural_access"
+    AUTH_COOKIE_SECURE: bool = False
+
     # Model paths
     MODELS_DIR: str = "models"
     RF_MODEL_PATH: str = "models/random_forest.pkl"

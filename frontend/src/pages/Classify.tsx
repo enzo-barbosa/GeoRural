@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Select, type SelectOption } from '@/components/ui/select'
+import { UserMenu } from '@/components/UserMenu'
 import { MapView, type MapFocus } from '@/components/map/MapView'
 import {
   LocationSearch,
@@ -157,6 +158,7 @@ export function Classify() {
               <a href="/" className="text-gray-600 hover:text-gray-900">Início</a>
               <span className="text-gray-900 font-medium">Classificar</span>
               <a href="/results" className="text-gray-600 hover:text-gray-900">Resultados</a>
+              <UserMenu />
             </nav>
           </div>
         </div>

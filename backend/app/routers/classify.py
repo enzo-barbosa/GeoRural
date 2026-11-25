@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from backend.app.dependencies.auth import get_current_user
 from backend.app.dependencies.models import get_gee, get_models_status
 from backend.app.schemas.classify import (
     ClassificationError,
@@ -18,7 +19,11 @@ from backend.app.schemas.classify import (
 from backend.app.services.classification_service import classify_area
 from src.gee.coverage import get_coverage, get_label_source
 
-router = APIRouter(prefix="/api/classify", tags=["classification"])
+router = APIRouter(
+    prefix="/api/classify",
+    tags=["classification"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post("", response_model=ClassifyResponse)

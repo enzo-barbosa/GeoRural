@@ -20,6 +20,7 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 - Medidas reais (área/perímetro), topografia (NASADEM/GLO-30) e **mapa de relevo** com hipsometria + hillshade
 - Tipo de cultivo (Brasil) e interface web React com mapa Leaflet
 - **Busca por endereço ou coordenadas** (Nominatim/OSM) que centraliza o mapa no local
+- **Login/cadastro** com sessão em cookie httpOnly e senhas com Argon2
 
 ## Requisitos
 

@@ -1,13 +1,16 @@
 import axios from 'axios'
 import type {
+  AuthUser,
   ClassifyRequest,
   ClassifyResponse,
   CoverageRequest,
   CoverageResponse,
   GeocodeResponse,
   GeocodeResult,
+  LoginRequest,
   ModelsStatusResponse,
   HealthResponse,
+  RegisterRequest,
 } from '@/types/api'
 
 const api = axios.create({
@@ -15,8 +18,43 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
   timeout: 300000, // 5 minutes for classification
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      const url = error.config?.url ?? ''
+      if (!url.startsWith('/auth/')) {
+        window.dispatchEvent(new Event('auth:unauthorized'))
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+export const authApi = {
+  register: async (request: RegisterRequest): Promise<AuthUser> => {
+    const response = await api.post<AuthUser>('/auth/register', request)
+    return response.data
+  },
+
+  login: async (request: LoginRequest): Promise<AuthUser> => {
+    const response = await api.post<AuthUser>('/auth/login', request)
+    return response.data
+  },
+
+  logout: async (): Promise<void> => {
+    await api.post('/auth/logout')
+  },
+
+  me: async (): Promise<AuthUser> => {
+    const response = await api.get<AuthUser>('/auth/me')
+    return response.data
+  },
+}
 
 export const classifyApi = {
   classify: async (request: ClassifyRequest): Promise<ClassifyResponse> => {
