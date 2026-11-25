@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     INFERENCE_CHUNK_SIZE: int = 200_000
     UNET_BATCH_SIZE: int = 8
 
+    # Fila de classificação (1 worker em processo). Na inicialização, análises
+    # que ficaram "queued"/"running" após um restart são marcadas como falhas.
+    RECOVER_STALE_JOBS: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

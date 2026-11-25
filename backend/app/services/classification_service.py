@@ -2,9 +2,11 @@
 
 import gc
 import json
+import logging
 import os
 import tempfile
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -79,6 +81,23 @@ def _log_memory(stage: str) -> None:
     """Loga o RSS atual para acompanhar o pico durante a classificação."""
     rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
     print(f"[memory] {stage}: {rss_mb:.1f} MB")
+
+
+logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[str, int], None]
+
+
+def _report_progress(
+    callback: ProgressCallback | None, stage: str, progress: int
+) -> None:
+    """Informa a etapa atual; falhas de progresso não derrubam a classificação."""
+    if callback is None:
+        return
+    try:
+        callback(stage, progress)
+    except Exception:
+        logger.exception("Falha ao reportar progresso da etapa %s", stage)
 
 
 def _download_ee_image(
@@ -691,7 +710,7 @@ def new_job_id() -> str:
     return f"{stamp}_{uuid.uuid4().hex[:8]}"
 
 
-async def classify_area(
+def classify_area(
     polygon_coords: list[list[float]],
     satellite: str,
     classifier_name: str,
@@ -702,15 +721,18 @@ async def classify_area(
     include_crop: bool = True,
     postprocess: bool = True,
     job_id: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Main classification pipeline."""
     job_id = job_id or new_job_id()
     _log_memory("classify:start")
+    _report_progress(on_progress, "starting", 5)
 
     geometry = polygon_to_ee_geometry(polygon_coords)
 
     poly = polygon_metrics(polygon_coords)
     area_ha = float(poly.get("area_ha", 0.0))
+    _report_progress(on_progress, "validating", 10)
     scale = 10 if satellite == "sentinel2" else 30
     limit_message = area_limit_message(
         area_ha, scale, get_settings().MAX_CLASSIFY_PIXELS
@@ -723,6 +745,7 @@ async def classify_area(
         }
     estimated_pixels = int(area_ha * 10_000 / (scale * scale))
 
+    _report_progress(on_progress, "coverage", 15)
     try:
         coverage = get_coverage(polygon_coords)
     except Exception as exc:  # noqa: BLE001
@@ -735,8 +758,10 @@ async def classify_area(
     label_source = get_label_source(coverage)
     crop_allowed = include_crop and coverage == "brazil"
 
+    _report_progress(on_progress, "searching_images", 20)
     collection = search_images(geometry, start_date, end_date, satellite, max_cloud)
     num_images = collection.size().getInfo()
+    _report_progress(on_progress, "searching_images", 25)
 
     if num_images == 0:
         return {
@@ -745,10 +770,14 @@ async def classify_area(
             "error": "Nenhuma imagem encontrada para os critérios selecionados.",
         }
 
+    _report_progress(on_progress, "downloading", 35)
     composite = get_composite_image(collection, geometry)
+    _report_progress(on_progress, "preprocessing", 45)
     composite = preprocess_image(composite, satellite)
+    _report_progress(on_progress, "features", 55)
     composite = extract_features_ee(composite, satellite)
 
+    _report_progress(on_progress, "inference", 65)
     try:
         pred_map, probabilities, meta, rgb_image, models_used, weights = (
             _classify_area_real(
@@ -790,6 +819,7 @@ async def classify_area(
     gc.collect()
     _log_memory("after confidence")
 
+    _report_progress(on_progress, "postprocessing", 75)
     postprocessed = False
     if postprocess:
         pred_map = majority_filter(
@@ -799,6 +829,7 @@ async def classify_area(
 
     class_names = CLASS_NAMES if coverage == "brazil" else CLASS_NAMES_GLOBAL
 
+    _report_progress(on_progress, "saving_layers", 82)
     classification_img = _layer_image(
         pred_map, class_names, CLASS_COLORS, mask
     )
@@ -842,6 +873,7 @@ async def classify_area(
 
     topography = None
     if include_topography:
+        _report_progress(on_progress, "topography", 88)
         try:
             topography, topo_layers = _compute_topography(
                 geometry, pred_map, transform, crs, mask, job_id
@@ -852,6 +884,7 @@ async def classify_area(
 
     crop_stats = None
     if crop_allowed:
+        _report_progress(on_progress, "crop", 94)
         try:
             crop_stats, crop_layer = _compute_crop(
                 geometry,
@@ -872,6 +905,7 @@ async def classify_area(
 
     gc.collect()
     _log_memory("after layers")
+    _report_progress(on_progress, "finalizing", 98)
 
     return {
         "job_id": job_id,
