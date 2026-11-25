@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
+    # Banco de dados (Postgres no Docker Compose; localhost:5434 no host)
+    DATABASE_URL: str = (
+        "postgresql+psycopg://georural:georural@localhost:5434/georural"
+    )
+
     # Model paths
     MODELS_DIR: str = "models"
     RF_MODEL_PATH: str = "models/random_forest.pkl"
