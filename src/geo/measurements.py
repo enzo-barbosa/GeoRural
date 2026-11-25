@@ -1,6 +1,5 @@
 """Métricas geométricas reais (área e perímetro) para propriedades rurais."""
 
-import cv2
 import numpy as np
 from pyproj import CRS, Transformer
 from rasterio.features import geometry_mask
@@ -53,6 +52,8 @@ def _count_parcels(mask: np.ndarray) -> int:
     """Conta talhões (componentes conexos) em uma máscara binária."""
     if not mask.any():
         return 0
+    import cv2
+
     num_labels, _ = cv2.connectedComponents(
         mask.astype(np.uint8), connectivity=8
     )
