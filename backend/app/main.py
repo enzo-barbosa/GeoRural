@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.config import get_settings
-from backend.app.routers import classify, geocode, health
+from backend.app.routers import auth, classify, geocode, health
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(classify.router)
     app.include_router(geocode.router)
 
