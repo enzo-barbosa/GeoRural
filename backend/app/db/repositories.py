@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.app.db.models import Analysis, Area, User
 
@@ -65,6 +65,67 @@ def list_areas(db: Session, user_id: int | None = None) -> list[Area]:
     if user_id is not None:
         query = query.where(Area.user_id == user_id)
     return list(db.scalars(query).all())
+
+
+def get_area(db: Session, area_id: int, user_id: int | None = None) -> Area | None:
+    """Busca uma área, opcionalmente exigindo que pertença ao usuário."""
+    area = db.get(Area, area_id)
+    if area is None:
+        return None
+    if user_id is not None and area.user_id != user_id:
+        return None
+    return area
+
+
+def update_area(
+    db: Session,
+    area: Area,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> Area:
+    """Atualiza os campos editáveis de uma área."""
+    if name is not None:
+        area.name = name.strip()
+    if description is not None:
+        stripped = description.strip()
+        area.description = stripped or None
+    db.commit()
+    db.refresh(area)
+    return area
+
+
+def delete_area(db: Session, area: Area) -> None:
+    """Remove uma área; as análises relacionadas ficam com area_id nulo."""
+    db.delete(area)
+    db.commit()
+
+
+def list_analyses(
+    db: Session, user_id: int, *, limit: int = 20, offset: int = 0
+) -> list[Analysis]:
+    """Lista as análises do usuário, mais recentes primeiro."""
+    query = (
+        select(Analysis)
+        .options(selectinload(Analysis.area))
+        .where(Analysis.user_id == user_id)
+        .order_by(Analysis.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(db.scalars(query).all())
+
+
+def get_analysis_for_user(
+    db: Session, job_id: str, user_id: int
+) -> Analysis | None:
+    """Busca uma análise garantindo que pertence ao usuário."""
+    query = (
+        select(Analysis)
+        .options(selectinload(Analysis.area))
+        .where(Analysis.id == job_id, Analysis.user_id == user_id)
+    )
+    return db.scalar(query)
 
 
 def create_analysis(

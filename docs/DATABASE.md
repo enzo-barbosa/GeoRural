@@ -15,6 +15,7 @@ areas
 
 analyses
   id (job_id), user_id -> users.id, area_id -> areas.id,
+  name, geojson (JSON), area_ha,
   satellite, classifier, coverage, label_source, start_date, end_date,
   max_cloud, include_topography, include_crop, postprocess,
   status, stage, progress, error, num_images, confidence_mean,
@@ -22,10 +23,12 @@ analyses
   created_at, updated_at
 ```
 
-- `password_hash` fica nulo até o fluxo de autenticação ser implementado.
+- `password_hash` guarda o hash Argon2 gerado no cadastro.
 - `user_id`/`area_id` usam `ON DELETE SET NULL` para preservar o histórico.
 - `analyses.result` guarda o payload completo da classificação (stats, camadas,
   medições, topografia etc.).
+- `analyses.name`, `geojson` e `area_ha` guardam um snapshot da execução: a
+  análise continua reabrível mesmo se a área salva for excluída.
 
 ## Migrações
 

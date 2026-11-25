@@ -83,6 +83,9 @@ class Analysis(Base):
     area_id: Mapped[int | None] = mapped_column(
         ForeignKey("areas.id", ondelete="SET NULL"), index=True, nullable=True
     )
+    name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    geojson: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    area_ha: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     satellite: Mapped[str] = mapped_column(String(20), nullable=False)
     classifier: Mapped[str] = mapped_column(String(40), nullable=False)

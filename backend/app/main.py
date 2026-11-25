@@ -9,7 +9,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.config import get_settings
-from backend.app.routers import auth, classify, geocode, health
+from backend.app.routers import (
+    analyses,
+    areas,
+    auth,
+    classify,
+    geocode,
+    health,
+    outputs,
+)
 
 
 @asynccontextmanager
@@ -46,13 +54,11 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(areas.router)
+    app.include_router(analyses.router)
     app.include_router(classify.router)
     app.include_router(geocode.router)
-
-    # Serve output files
-    outputs_dir = Path(settings.OUTPUTS_DIR)
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    app.mount("/outputs", StaticFiles(directory=str(outputs_dir)), name="outputs")
+    app.include_router(outputs.router)
 
     # Serve React frontend (build directory)
     frontend_dist = Path("backend/frontend/dist")
@@ -61,8 +67,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         async def serve_react(full_path: str):
-            # Skip API routes
-            if full_path.startswith("api/"):
+            # Skip API and protected output routes
+            if full_path.startswith(("api/", "outputs/")):
                 from fastapi import HTTPException
                 raise HTTPException(status_code=404, detail="Not found")
             index_file = frontend_dist / "index.html"

@@ -28,6 +28,8 @@ export interface ClassifyRequest {
   include_topography?: boolean
   include_crop?: boolean
   postprocess?: boolean
+  area_id?: number | null
+  name?: string | null
 }
 
 export interface CoverageRequest {
@@ -174,4 +176,61 @@ export interface LoginRequest {
 
 export interface RegisterRequest extends LoginRequest {
   name: string
+}
+
+export interface Area {
+  id: number
+  name: string
+  description: string | null
+  geojson: PolygonGeometry
+  area_ha: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AreaCreateRequest {
+  name: string
+  description?: string | null
+  polygon: PolygonGeometry
+}
+
+export interface AreaUpdateRequest {
+  name?: string
+  description?: string | null
+}
+
+export type AnalysisStatus = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface AnalysisSummary {
+  id: string
+  name: string | null
+  status: AnalysisStatus
+  stage: string | null
+  progress: number
+  error: string | null
+  satellite: string
+  classifier: string
+  coverage: 'brazil' | 'global' | null
+  start_date: string | null
+  end_date: string | null
+  area_id: number | null
+  area_name: string | null
+  area_ha: number | null
+  num_images: number | null
+  confidence_mean: number | null
+  image_url: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AnalysisDetail extends AnalysisSummary {
+  label_source: string | null
+  max_cloud: number | null
+  include_topography: boolean
+  include_crop: boolean
+  postprocess: boolean
+  models_used: string[] | null
+  weights: Record<string, number> | null
+  geojson: PolygonGeometry | null
+  result: ClassificationResult | null
 }

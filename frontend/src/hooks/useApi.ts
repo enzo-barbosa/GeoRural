@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { classifyApi, geocodeApi, healthApi } from '@/services/api'
-import type { ClassifyRequest } from '@/types/api'
+import {
+  analysesApi,
+  areasApi,
+  classifyApi,
+  geocodeApi,
+  healthApi,
+} from '@/services/api'
+import type {
+  AreaCreateRequest,
+  AreaUpdateRequest,
+  ClassifyRequest,
+} from '@/types/api'
 
 export function useHealth() {
   return useQuery({
@@ -26,21 +36,81 @@ export function useClassify() {
     mutationFn: (request: ClassifyRequest) => classifyApi.classify(request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['modelsStatus'] })
+      queryClient.invalidateQueries({ queryKey: ['analyses'] })
     },
   })
 }
 
-export function useClassificationResult(jobId: string | null) {
+export function useAnalysis(jobId: string | null) {
   return useQuery({
-    queryKey: ['classificationResult', jobId],
-    queryFn: async () => {
-      if (!jobId) return null
-      // Poll for result - the classify endpoint returns immediately with result
-      // In a production app, you'd have a separate endpoint to poll for async jobs
-      return null
-    },
+    queryKey: ['analysis', jobId],
+    queryFn: () => analysesApi.get(jobId as string),
     enabled: !!jobId,
-    refetchInterval: 2000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'queued' || status === 'running' ? 2000 : false
+    },
+  })
+}
+
+export function useAnalyses(limit = 20) {
+  return useQuery({
+    queryKey: ['analyses', limit],
+    queryFn: () => analysesApi.list(limit),
+  })
+}
+
+export function useAreas() {
+  return useQuery({
+    queryKey: ['areas'],
+    queryFn: areasApi.list,
+  })
+}
+
+export function useArea(areaId: number | null) {
+  return useQuery({
+    queryKey: ['area', areaId],
+    queryFn: () => areasApi.get(areaId as number),
+    enabled: areaId != null,
+  })
+}
+
+export function useCreateArea() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: AreaCreateRequest) => areasApi.create(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['areas'] })
+    },
+  })
+}
+
+export function useUpdateArea() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      areaId,
+      request,
+    }: {
+      areaId: number
+      request: AreaUpdateRequest
+    }) => areasApi.update(areaId, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['areas'] })
+    },
+  })
+}
+
+export function useDeleteArea() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (areaId: number) => areasApi.remove(areaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['areas'] })
+    },
   })
 }
 

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ComponentType } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useState, type ComponentType } from 'react'
+import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import {
   ArrowLeft,
   Download,
@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { UserMenu } from '@/components/UserMenu'
 import { ResultMap } from '@/components/map/ResultMap'
-import type { ClassificationResult } from '@/types/api'
+import { useAnalysis } from '@/hooks/useApi'
 import {
   BarChart,
   Bar,
@@ -79,40 +79,13 @@ export function Results() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const jobId = searchParams.get('job_id')
-  const [result, setResult] = useState<ClassificationResult | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'real' | 'classification' | 'overlay'>('classification')
   const [overlayAlpha, setOverlayAlpha] = useState(0.5)
 
-  useEffect(() => {
-    if (!jobId) {
-      setError('Nenhum job_id fornecido')
-      setLoading(false)
-      return
-    }
+  const { data: analysis, isLoading, isError } = useAnalysis(jobId)
+  const result = analysis?.result ?? null
 
-    const stored = localStorage.getItem(`result_${jobId}`)
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as ClassificationResult
-        if (!parsed || !parsed.stats || !parsed.classification_image_url) {
-          throw new Error('Formato de resultado incompatível')
-        }
-        setResult(parsed)
-      } catch {
-        localStorage.removeItem(`result_${jobId}`)
-        setError('Resultado antigo/incompatível. Faça a classificação novamente.')
-      }
-      setLoading(false)
-      return
-    }
-
-    setError('Resultado não encontrado no armazenamento local')
-    setLoading(false)
-  }, [jobId])
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -123,18 +96,60 @@ export function Results() {
     )
   }
 
-  if (error || !result) {
+  if (isError || !analysis) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="py-12 text-center">
             <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-gray-900">Resultado não encontrado</h2>
-            <p className="mt-2 text-gray-600">{error || 'Faça uma classificação primeiro'}</p>
+            <p className="mt-2 text-gray-600">
+              {jobId
+                ? 'Esta análise não existe ou não pertence à sua conta.'
+                : 'Nenhum job_id fornecido.'}
+            </p>
             <Button onClick={() => navigate('/classify')} className="mt-6">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Voltar para Classificar
             </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (analysis.status === 'failed') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-gray-900">Análise falhou</h2>
+            <p className="mt-2 text-gray-600">
+              {analysis.error ?? 'Erro desconhecido na classificação.'}
+            </p>
+            <Button onClick={() => navigate('/classify')} className="mt-6">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (analysis.status !== 'completed' || !result) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="py-12 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent mx-auto" />
+            <h2 className="mt-4 text-xl font-bold text-gray-900">
+              Processando análise
+            </h2>
+            <p className="mt-2 text-gray-600">
+              {analysis.stage ?? 'Aguardando processamento'} — {analysis.progress}%
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -185,11 +200,21 @@ export function Results() {
                 <ArrowLeft className="h-5 w-5" />
               </Button>
               <div>
-                <h1 className="text-xl font-bold text-gray-900">Resultados da Classificação</h1>
+                <h1 className="text-xl font-bold text-gray-900">
+                  {analysis.name ?? 'Resultados da Classificação'}
+                </h1>
                 <p className="text-sm text-gray-500">Job: {result.job_id}</p>
               </div>
             </div>
-            <UserMenu />
+            <nav className="flex items-center gap-4">
+              <Link to="/areas" className="text-gray-600 hover:text-gray-900">
+                Minhas áreas
+              </Link>
+              <Link to="/analyses" className="text-gray-600 hover:text-gray-900">
+                Histórico
+              </Link>
+              <UserMenu />
+            </nav>
           </div>
         </div>
       </header>

@@ -4,6 +4,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { Home } from '@/pages/Home'
+import { Analyses } from '@/pages/Analyses'
+import { Areas } from '@/pages/Areas'
 import { Classify } from '@/pages/Classify'
 import { Login } from '@/pages/Login'
 import { Register } from '@/pages/Register'
@@ -38,6 +40,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Results />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/areas"
+        element={
+          <ProtectedRoute>
+            <Areas />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/analyses"
+        element={
+          <ProtectedRoute>
+            <Analyses />
           </ProtectedRoute>
         }
       />

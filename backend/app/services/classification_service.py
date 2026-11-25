@@ -685,6 +685,12 @@ def _compute_crop(
     return crop_stats, layer
 
 
+def new_job_id() -> str:
+    """Gera o identificador da análise no mesmo formato do histórico."""
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    return f"{stamp}_{uuid.uuid4().hex[:8]}"
+
+
 async def classify_area(
     polygon_coords: list[list[float]],
     satellite: str,
@@ -695,10 +701,10 @@ async def classify_area(
     include_topography: bool = True,
     include_crop: bool = True,
     postprocess: bool = True,
+    job_id: str | None = None,
 ) -> dict:
     """Main classification pipeline."""
-    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    job_id = f"{stamp}_{uuid.uuid4().hex[:8]}"
+    job_id = job_id or new_job_id()
     _log_memory("classify:start")
 
     geometry = polygon_to_ee_geometry(polygon_coords)

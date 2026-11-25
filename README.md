@@ -21,6 +21,8 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 - Tipo de cultivo (Brasil) e interface web React com mapa Leaflet
 - **Busca por endereço ou coordenadas** (Nominatim/OSM) que centraliza o mapa no local
 - **Login/cadastro** com sessão em cookie httpOnly e senhas com Argon2
+- **Áreas salvas e histórico** de análises por usuário, com reabertura de resultados
+- Imagens geradas em `/outputs/...` protegidas por dono da análise
 
 ## Requisitos
 
@@ -112,6 +114,12 @@ docker compose -f compose.prod.yml up --build
 > inclui. Sem a release `models-v1`, rode o app apenas com os modelos que você
 > já tem em `models/`. Detalhes de versões e publicação em
 > [`docs/MODELS.md`](docs/MODELS.md).
+
+Documentação da API, autenticação e banco:
+
+- [`docs/API.md`](docs/API.md) — endpoints de áreas, análises e classificação
+- [`docs/AUTH.md`](docs/AUTH.md) — sessão, cookie e configuração do JWT
+- [`docs/DATABASE.md`](docs/DATABASE.md) — schema e migrações
 
 ## Uso
 

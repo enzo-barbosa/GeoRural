@@ -39,6 +39,8 @@ class ClassifyRequest(BaseModel):
     include_topography: bool = True
     include_crop: bool = True
     postprocess: bool = True
+    area_id: int | None = None
+    name: str | None = Field(default=None, max_length=160)
 
 
 class ClassStats(BaseModel):

@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   MapPin,
   AlertCircle,
@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Satellite,
   Globe2,
+  Save,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,8 +20,15 @@ import {
   LocationSearch,
   type LocationSelection,
 } from '@/components/map/LocationSearch'
-import { useClassify, useModelsStatus } from '@/hooks/useApi'
+import {
+  useArea,
+  useAreas,
+  useClassify,
+  useCreateArea,
+  useModelsStatus,
+} from '@/hooks/useApi'
 import { classifyApi } from '@/services/api'
+import { apiErrorMessage } from '@/lib/errors'
 import type { ClassifierName, ClassifyRequest } from '@/types/api'
 
 const CLASSIFIER_OPTIONS = [
@@ -43,6 +51,12 @@ const CLASS_LEGEND = [
 
 export function Classify() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const areaParam = searchParams.get('area_id')
+  const requestedAreaId = areaParam && Number.isFinite(Number(areaParam))
+    ? Number(areaParam)
+    : null
+
   const [polygon, setPolygon] = useState<number[][][] | null>(null)
   const [focus, setFocus] = useState<MapFocus | null>(null)
   const [marker, setMarker] = useState<[number, number] | null>(null)
@@ -57,14 +71,33 @@ export function Classify() {
   const [postprocess, setPostprocess] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [activeAreaId, setActiveAreaId] = useState<number | null>(null)
+  const [activeAreaName, setActiveAreaName] = useState<string | null>(null)
+  const [areaNameInput, setAreaNameInput] = useState('')
+  const [areaMessage, setAreaMessage] = useState<string | null>(null)
+  const [analysisName, setAnalysisName] = useState('')
+  const [mapKey, setMapKey] = useState(0)
+
   const { data: modelsStatus } = useModelsStatus()
+  const { data: areas = [] } = useAreas()
+  const { data: requestedArea } = useArea(requestedAreaId)
   const classifyMutation = useClassify()
+  const createArea = useCreateArea()
 
-  const handlePolygonDraw = useCallback(async (coordinates: number[][][]) => {
-    setPolygon(coordinates)
+  useEffect(() => {
+    if (!requestedArea) return
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPolygon(requestedArea.geojson.coordinates)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setActiveAreaId(requestedArea.id)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setActiveAreaName(requestedArea.name)
+    // oxlint-disable-next-line react/set-state-in-effect
+    setMapKey((key) => key + 1)
+  }, [requestedArea])
+
+  const updateCoverage = useCallback(async (coordinates: number[][][]) => {
     setCoverage(null)
-    setError(null)
-
     try {
       const result = await classifyApi.getCoverage({
         polygon: { type: 'Polygon', coordinates },
@@ -78,11 +111,76 @@ export function Classify() {
     }
   }, [])
 
+  const handlePolygonDraw = useCallback(
+    async (coordinates: number[][][]) => {
+      setPolygon(coordinates)
+      setActiveAreaId(null)
+      setActiveAreaName(null)
+      setAreaMessage(null)
+      setError(null)
+      setSearchParams({}, { replace: true })
+      await updateCoverage(coordinates)
+    },
+    [setSearchParams, updateCoverage]
+  )
+
   const handlePolygonRemove = useCallback(() => {
     setPolygon(null)
     setCoverage(null)
     setIncludeCrop(true)
-  }, [])
+    setActiveAreaId(null)
+    setActiveAreaName(null)
+    setSearchParams({}, { replace: true })
+  }, [setSearchParams])
+
+  const handleLoadArea = useCallback(
+    (value: string) => {
+      const area = areas.find((item) => String(item.id) === value)
+      if (!area) return
+
+      setPolygon(area.geojson.coordinates)
+      setActiveAreaId(area.id)
+      setActiveAreaName(area.name)
+      setAreaMessage(null)
+      setError(null)
+      setMapKey((key) => key + 1)
+      void updateCoverage(area.geojson.coordinates)
+    },
+    [areas, updateCoverage]
+  )
+
+  const handleUnlinkArea = useCallback(() => {
+    setActiveAreaId(null)
+    setActiveAreaName(null)
+    setAreaMessage(null)
+    setSearchParams({}, { replace: true })
+  }, [setSearchParams])
+
+  const handleSaveArea = async () => {
+    if (!polygon) return
+    const name = areaNameInput.trim()
+    if (!name) {
+      setAreaMessage('Informe um nome para salvar a área.')
+      return
+    }
+
+    setAreaMessage(null)
+    try {
+      const area = await createArea.mutateAsync({
+        name,
+        polygon: { type: 'Polygon', coordinates: polygon },
+      })
+      setActiveAreaId(area.id)
+      setActiveAreaName(area.name)
+      setAreaNameInput('')
+      setAreaMessage('Área salva em Minhas áreas.')
+      setSearchParams({ area_id: String(area.id) }, { replace: true })
+    } catch (err) {
+      setAreaMessage(
+        apiErrorMessage(err, 'Não foi possível salvar a área.')
+      )
+    }
+  }
 
   const handleLocationSelect = useCallback(
     (selection: LocationSelection) => {
@@ -128,6 +226,8 @@ export function Classify() {
       include_topography: includeTopography,
       include_crop: coverage === 'global' ? false : includeCrop,
       postprocess,
+      area_id: activeAreaId,
+      name: analysisName.trim() || null,
     }
 
     try {
@@ -138,10 +238,9 @@ export function Classify() {
         return
       }
 
-      localStorage.setItem(`result_${result.job_id}`, JSON.stringify(result))
       navigate(`/results?job_id=${result.job_id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao classificar')
+      setError(apiErrorMessage(err, 'Erro ao classificar'))
     }
   }
 
@@ -158,6 +257,8 @@ export function Classify() {
               <a href="/" className="text-gray-600 hover:text-gray-900">Início</a>
               <span className="text-gray-900 font-medium">Classificar</span>
               <a href="/results" className="text-gray-600 hover:text-gray-900">Resultados</a>
+              <a href="/areas" className="text-gray-600 hover:text-gray-900">Minhas áreas</a>
+              <a href="/analyses" className="text-gray-600 hover:text-gray-900">Histórico</a>
               <UserMenu />
             </nav>
           </div>
@@ -189,6 +290,7 @@ export function Classify() {
               <CardContent>
                 <LocationSearch onSelect={handleLocationSelect} />
                 <MapView
+                  key={mapKey}
                   onDraw={handlePolygonDraw}
                   onRemove={handlePolygonRemove}
                   initialPolygon={polygon}
@@ -217,6 +319,70 @@ export function Classify() {
                     </span>
                   </div>
                 )}
+
+                <div className="mt-4 border-t pt-4 space-y-3">
+                  <div>
+                    <Label>Área salva</Label>
+                    <Select
+                      value={activeAreaId ? String(activeAreaId) : ''}
+                      onValueChange={handleLoadArea}
+                      options={areas.map((area) => ({
+                        value: String(area.id),
+                        label: area.area_ha
+                          ? `${area.name} (${area.area_ha.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} ha)`
+                          : area.name,
+                      }))}
+                      placeholder={
+                        areas.length > 0
+                          ? 'Carregar uma área salva'
+                          : 'Nenhuma área salva ainda'
+                      }
+                      disabled={areas.length === 0}
+                      className="mt-2"
+                    />
+                  </div>
+
+                  {activeAreaName ? (
+                    <div className="flex items-center justify-between gap-2 text-sm bg-emerald-50 text-emerald-800 p-3 rounded-lg">
+                      <span>
+                        Área selecionada: <strong>{activeAreaName}</strong>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleUnlinkArea}
+                      >
+                        Desvincular
+                      </Button>
+                    </div>
+                  ) : polygon ? (
+                    <div className="flex gap-2">
+                      <input
+                        value={areaNameInput}
+                        onChange={(event) => setAreaNameInput(event.target.value)}
+                        placeholder="Nome da área (ex.: Fazenda Boa Vista)"
+                        className="w-full h-10 rounded-md border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          void handleSaveArea()
+                        }}
+                        disabled={createArea.isPending}
+                        className="gap-1.5 whitespace-nowrap"
+                      >
+                        <Save className="h-4 w-4" />
+                        {createArea.isPending ? 'Salvando...' : 'Salvar área'}
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {areaMessage && (
+                    <p className="text-xs text-gray-600">{areaMessage}</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -391,6 +557,18 @@ export function Classify() {
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="border-t pt-6">
+                    <Label htmlFor="analysis_name">Nome da análise (opcional)</Label>
+                    <input
+                      id="analysis_name"
+                      type="text"
+                      value={analysisName}
+                      onChange={(event) => setAnalysisName(event.target.value)}
+                      placeholder="Ex.: Safra 2023 — Fazenda Boa Vista"
+                      className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
                   </div>
 
                   <Button
