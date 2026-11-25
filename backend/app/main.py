@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from backend.app.routers import (
     health,
     outputs,
 )
+from backend.app.services.job_queue import JobQueue, mark_interrupted_jobs
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -27,8 +31,23 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     Path(settings.OUTPUTS_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.MODELS_DIR).mkdir(parents=True, exist_ok=True)
+
+    if settings.RECOVER_STALE_JOBS:
+        try:
+            interrupted = mark_interrupted_jobs()
+            if interrupted:
+                logger.warning(
+                    "Marcadas %d análises interrompidas de um restart anterior",
+                    interrupted,
+                )
+        except Exception:
+            logger.exception("Falha ao recuperar análises interrompidas")
+
+    app.state.job_queue = JobQueue()
     yield
-    # Shutdown (cleanup if needed)
+    # Shutdown: jobs na fila são descartados; o processo em execução continua
+    # até terminar (o restart seguinte marca o job como interrompido).
+    app.state.job_queue.shutdown()
 
 
 def create_app() -> FastAPI:

@@ -44,15 +44,24 @@ Todas as rotas exigem sessão e são isoladas por usuário.
 |---|---|---|
 | GET | `/api/analyses?limit=20&offset=0` | histórico do usuário |
 | GET | `/api/analyses/{job_id}` | detalhe com `result` completo |
+| POST | `/api/analyses/{job_id}/retry` | reprocessa com os mesmos parâmetros |
 
 Cada chamada a `POST /api/classify` cria automaticamente um registro em
-`analyses`, com status `running` e depois `completed` ou `failed`.
+`analyses` com status `queued`. O worker muda para `running`, atualiza
+`stage`/`progress` e termina em `completed` ou `failed`.
+
+`GET /api/analyses/{job_id}` é o endpoint de polling: consulte a cada ~2 s
+enquanto `status` for `queued` ou `running`.
+
+`POST /api/analyses/{job_id}/retry` cria uma nova análise (novo `job_id`) com
+o polígono e os parâmetros da original, sem alterar a antiga. Retorna 409 se a
+original ainda estiver em andamento ou não tiver polígono salvo.
 
 ## Classificação
 
 | Método | Rota | Descrição |
 |---|---|---|
-| POST | `/api/classify` | classifica um polígono |
+| POST | `/api/classify` | enfileira um polígono (202) |
 | GET | `/api/classify/models` | disponibilidade dos modelos |
 | POST | `/api/classify/coverage` | cobertura Brasil/global |
 
@@ -65,8 +74,17 @@ Cada chamada a `POST /api/classify` cria automaticamente um registro em
 }
 ```
 
-`area_id` é opcional e precisa pertencer ao usuário. O endpoint continua
-síncrono; o job assíncrono com progresso real virá no próximo PR.
+`area_id` é opcional e precisa pertencer ao usuário. A resposta é imediata:
+
+```json
+{
+  "job_id": "20231125_120000_ab12cd34",
+  "status": "pending"
+}
+```
+
+O processamento roda em segundo plano, uma análise por vez. Acompanhe pelo
+detalhe da análise; detalhes da fila em [`JOBS.md`](JOBS.md).
 
 ## Imagens
 

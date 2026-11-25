@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AlertCircle, History, MapPin } from 'lucide-react'
+import { AlertCircle, History, MapPin, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { UserMenu } from '@/components/UserMenu'
-import { useAnalyses } from '@/hooks/useApi'
+import { useAnalyses, useRetryAnalysis } from '@/hooks/useApi'
 import { formatArea, formatDateTime } from '@/lib/format'
+import { isActiveStatus, jobStageLabel } from '@/lib/jobs'
 import type { AnalysisStatus } from '@/types/api'
 
 const STATUS_LABEL: Record<AnalysisStatus, string> = {
@@ -24,6 +26,18 @@ const STATUS_CLASS: Record<AnalysisStatus, string> = {
 export function Analyses() {
   const navigate = useNavigate()
   const { data: analyses = [], isLoading, isError } = useAnalyses()
+  const retryMutation = useRetryAnalysis()
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const handleRetry = async (jobId: string) => {
+    setActionError(null)
+    try {
+      const pending = await retryMutation.mutateAsync(jobId)
+      navigate(`/results?job_id=${pending.job_id}`)
+    } catch {
+      setActionError('Não foi possível reprocessar a análise.')
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -53,6 +67,9 @@ export function Analyses() {
           <p className="mt-2 text-gray-600">
             Todas as classificações feitas na sua conta, mais recentes primeiro.
           </p>
+          {actionError && (
+            <p className="mt-3 text-sm text-red-600">{actionError}</p>
+          )}
         </div>
 
         {isLoading && (
@@ -129,6 +146,22 @@ export function Analyses() {
                           Área: {analysis.area_name}
                         </p>
                       )}
+                      {isActiveStatus(analysis.status) && (
+                        <div className="mt-2 max-w-sm">
+                          <div className="flex justify-between text-xs text-gray-500">
+                            <span>{jobStageLabel(analysis.stage)}</span>
+                            <span>{analysis.progress}%</span>
+                          </div>
+                          <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, analysis.progress))}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
                       {analysis.status === 'failed' && analysis.error && (
                         <p className="mt-1 flex items-center gap-1 text-sm text-red-600">
                           <AlertCircle className="h-4 w-4" />
@@ -137,14 +170,28 @@ export function Analyses() {
                       )}
                     </div>
 
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        navigate(`/results?job_id=${analysis.id}`)
-                      }
-                    >
-                      Ver resultado
-                    </Button>
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          navigate(`/results?job_id=${analysis.id}`)
+                        }
+                      >
+                        {isActiveStatus(analysis.status)
+                          ? 'Acompanhar'
+                          : 'Ver resultado'}
+                      </Button>
+                      {analysis.status === 'failed' && (
+                        <Button
+                          onClick={() => handleRetry(analysis.id)}
+                          disabled={retryMutation.isPending}
+                          className="gap-2"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          Reprocessar
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

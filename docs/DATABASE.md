@@ -30,6 +30,24 @@ analyses
 - `analyses.name`, `geojson` e `area_ha` guardam um snapshot da execução: a
   análise continua reabrível mesmo se a área salva for excluída.
 
+### Ciclo de vida da análise
+
+```text
+queued -> running -> completed
+                  \-> failed
+```
+
+- `queued`: criada e aguardando o worker.
+- `running`: em execução; `stage` e `progress` (0–100) são atualizados a cada
+  etapa.
+- `completed`: `result` guarda o payload completo.
+- `failed`: `error` traz a mensagem e `stage` indica onde parou.
+- `interrupted`: usado na inicialização quando uma análise ficou em
+  `queued`/`running` após um restart do servidor.
+
+A recuperação roda no startup do backend e pode ser desligada com
+`RECOVER_STALE_JOBS=false`. Ela pressupõe **um processo Uvicorn**.
+
 ## Migrações
 
 ```bash

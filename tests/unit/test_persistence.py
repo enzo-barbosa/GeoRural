@@ -1,5 +1,6 @@
 """Testes de áreas, histórico, persistência da classificação e outputs."""
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,16 @@ from sqlalchemy.pool import StaticPool
 from backend.app.config import get_settings
 from backend.app.db.base import Base
 from backend.app.db.models import Analysis
+from backend.app.db.repositories import create_analysis
 from backend.app.db.session import get_db
 from backend.app.dependencies.models import get_gee
 from backend.app.main import create_app
+from backend.app.services.job_queue import (
+    JobQueue,
+    get_job_queue,
+    mark_interrupted_jobs,
+    run_analysis_job,
+)
 
 POLYGON = {
     "type": "Polygon",
@@ -43,8 +51,23 @@ def db():
     Base.metadata.drop_all(engine)
 
 
+class RecordingQueue:
+    """Fila falsa: registra os jobs em vez de executá-los em outra thread."""
+
+    def __init__(self) -> None:
+        self.jobs: list[str] = []
+
+    def submit(self, job_id: str) -> None:
+        self.jobs.append(job_id)
+
+
 @pytest.fixture()
-def client(db):
+def queue():
+    return RecordingQueue()
+
+
+@pytest.fixture()
+def client(db, queue):
     app = create_app()
 
     def override_get_db():
@@ -52,6 +75,7 @@ def client(db):
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_gee] = lambda: None
+    app.dependency_overrides[get_job_queue] = lambda: queue
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -260,101 +284,267 @@ def _fake_result(job_id: str, status: str = "completed") -> dict:
     }
 
 
-def test_classification_is_persisted(client, db, monkeypatch):
-    import backend.app.routers.classify as classify_router
+CLASSIFY_PAYLOAD = {
+    "polygon": POLYGON,
+    "satellite": "sentinel2",
+    "classifier": "auto",
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31",
+}
 
-    async def fake_classify(**kwargs):
-        return _fake_result(kwargs["job_id"])
 
-    monkeypatch.setattr(classify_router, "classify_area", fake_classify)
+def _submit(client, **overrides):
+    payload = {**CLASSIFY_PAYLOAD, **overrides}
+    return client.post("/api/classify", json=payload)
 
+
+def test_classification_is_queued(client, db, queue):
     user = _register(client)
     area = _create_area(client)
 
-    response = client.post(
-        "/api/classify",
-        json={
-            "polygon": POLYGON,
-            "satellite": "sentinel2",
-            "classifier": "auto",
-            "start_date": "2023-01-01",
-            "end_date": "2023-12-31",
-            "area_id": area["id"],
-            "name": "Safra 2023",
-        },
+    response = _submit(
+        client, area_id=area["id"], name="Safra 2023"
     )
 
-    assert response.status_code == 200, response.text
-    job_id = response.json()["job_id"]
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["status"] == "pending"
+    job_id = body["job_id"]
+    assert queue.jobs == [job_id]
 
     analysis = db.get(Analysis, job_id)
     assert analysis is not None
     assert analysis.user_id == user["id"]
     assert analysis.area_id == area["id"]
     assert analysis.name == "Safra 2023"
+    assert analysis.status == "queued"
+    assert analysis.stage == "queued"
+    assert analysis.progress == 0
+    assert analysis.geojson == POLYGON
+
+
+def test_completed_job_is_persisted(client, db, queue):
+    _register(client)
+    area = _create_area(client)
+    response = _submit(client, area_id=area["id"], name="Safra 2023")
+    job_id = response.json()["job_id"]
+
+    def fake_classify(**kwargs):
+        kwargs["on_progress"]("inference", 65)
+        # O progresso é visível no banco enquanto a classificação roda.
+        running = db.get(Analysis, job_id)
+        assert running is not None
+        assert running.status == "running"
+        assert running.stage == "inference"
+        assert running.progress == 65
+        return _fake_result(kwargs["job_id"])
+
+    run_analysis_job(job_id, db, classify=fake_classify)
+
+    analysis = db.get(Analysis, job_id)
+    assert analysis is not None
     assert analysis.status == "completed"
+    assert analysis.stage == "done"
     assert analysis.progress == 100
     assert analysis.result["measurements"]["total_area_ha"] == 12.5
+    assert analysis.area_ha == 12.5
+    assert analysis.coverage == "brazil"
 
     detail = client.get(f"/api/analyses/{job_id}")
     assert detail.status_code == 200
+    assert detail.json()["status"] == "completed"
     assert detail.json()["area_name"] == "Fazenda"
 
 
-def test_failed_classification_is_persisted(client, db, monkeypatch):
-    import backend.app.routers.classify as classify_router
-
-    async def fake_classify(**kwargs):
-        return _fake_result(kwargs["job_id"], status="failed")
-
-    monkeypatch.setattr(classify_router, "classify_area", fake_classify)
-
+def test_failed_job_is_persisted(client, db, queue):
     _register(client)
-    response = client.post(
-        "/api/classify",
-        json={
-            "polygon": POLYGON,
-            "satellite": "sentinel2",
-            "classifier": "auto",
-            "start_date": "2023-01-01",
-            "end_date": "2023-12-31",
-        },
+    response = _submit(client)
+    job_id = response.json()["job_id"]
+
+    run_analysis_job(
+        job_id,
+        db,
+        classify=lambda **kwargs: _fake_result(
+            kwargs["job_id"], status="failed"
+        ),
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "failed"
-
-    analysis = db.get(Analysis, body["job_id"])
+    analysis = db.get(Analysis, job_id)
     assert analysis is not None
     assert analysis.status == "failed"
+    assert analysis.stage == "failed"
     assert analysis.error == "sem imagens"
 
 
-def test_classification_rejects_foreign_area(client, db, monkeypatch):
-    import backend.app.routers.classify as classify_router
+def test_job_exception_marks_failed(client, db, queue):
+    _register(client)
+    response = _submit(client)
+    job_id = response.json()["job_id"]
 
-    async def fake_classify(**kwargs):  # pragma: no cover - não deve rodar
-        return _fake_result(kwargs["job_id"])
+    def explode(**kwargs):
+        raise RuntimeError("GEE fora do ar")
 
-    monkeypatch.setattr(classify_router, "classify_area", fake_classify)
+    run_analysis_job(job_id, db, classify=explode)
 
+    analysis = db.get(Analysis, job_id)
+    assert analysis is not None
+    assert analysis.status == "failed"
+    assert "GEE fora do ar" in (analysis.error or "")
+
+
+def test_classification_rejects_foreign_area(client, db, queue):
     _register(client, email="a@example.com", name="A")
     area = _create_area(client)
     client.post("/api/auth/logout")
     _register(client, email="b@example.com", name="B")
 
-    response = client.post(
-        "/api/classify",
-        json={
-            "polygon": POLYGON,
-            "satellite": "sentinel2",
-            "classifier": "auto",
-            "start_date": "2023-01-01",
-            "end_date": "2023-12-31",
-            "area_id": area["id"],
-        },
-    )
+    response = _submit(client, area_id=area["id"])
 
     assert response.status_code == 404
+    assert queue.jobs == []
     assert db.query(Analysis).count() == 0
+
+
+# ----------------------------- retry e órfãos ------------------------------
+
+
+def _completed_analysis(client, db, queue, name="Safra 2023"):
+    area = _create_area(client)
+    response = _submit(client, area_id=area["id"], name=name)
+    job_id = response.json()["job_id"]
+    run_analysis_job(
+        job_id, db, classify=lambda **kwargs: _fake_result(kwargs["job_id"])
+    )
+    return job_id, area["id"]
+
+
+def test_retry_copies_parameters_and_enqueues(client, db, queue):
+    _register(client)
+    job_id, area_id = _completed_analysis(client, db, queue)
+
+    response = client.post(f"/api/analyses/{job_id}/retry")
+
+    assert response.status_code == 202, response.text
+    new_id = response.json()["job_id"]
+    assert new_id != job_id
+    assert queue.jobs[-1] == new_id
+
+    copy = db.get(Analysis, new_id)
+    assert copy is not None
+    assert copy.status == "queued"
+    assert copy.stage == "queued"
+    assert copy.progress == 0
+    assert copy.area_id == area_id
+    assert copy.geojson == POLYGON
+    assert copy.name == "Safra 2023 (reprocessada)"
+    assert copy.satellite == "sentinel2"
+    assert copy.classifier == "auto"
+    assert copy.start_date == "2023-01-01"
+
+
+def test_retry_rejects_running_analysis(client, db, queue):
+    _register(client)
+    response = _submit(client)
+    job_id = response.json()["job_id"]
+
+    retry = client.post(f"/api/analyses/{job_id}/retry")
+
+    assert retry.status_code == 409
+    assert len(queue.jobs) == 1
+
+
+def test_retry_rejects_foreign_analysis(client, db, queue):
+    _register(client, email="a@example.com", name="A")
+    job_id, _ = _completed_analysis(client, db, queue)
+    client.post("/api/auth/logout")
+    _register(client, email="b@example.com", name="B")
+
+    response = client.post(f"/api/analyses/{job_id}/retry")
+
+    assert response.status_code == 404
+
+
+def test_mark_interrupted_jobs(db):
+    create_analysis(
+        db,
+        job_id="job-queued",
+        satellite="sentinel2",
+        classifier="auto",
+        status="queued",
+        stage="queued",
+    )
+    create_analysis(
+        db,
+        job_id="job-running",
+        satellite="sentinel2",
+        classifier="auto",
+        status="running",
+        stage="inference",
+    )
+    create_analysis(
+        db,
+        job_id="job-done",
+        satellite="sentinel2",
+        classifier="auto",
+        status="completed",
+        stage="done",
+    )
+
+    assert mark_interrupted_jobs(db) == 2
+
+    for job_id in ("job-queued", "job-running"):
+        analysis = db.get(Analysis, job_id)
+        assert analysis is not None
+        assert analysis.status == "failed"
+        assert analysis.stage == "interrupted"
+
+    done = db.get(Analysis, "job-done")
+    assert done is not None
+    assert done.status == "completed"
+
+
+def test_job_queue_runs_submitted_job():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        create_analysis(
+            session,
+            job_id="job-queue",
+            satellite="sentinel2",
+            classifier="auto",
+            geojson=POLYGON,
+            start_date="2023-01-01",
+            end_date="2023-12-31",
+            status="queued",
+            stage="queued",
+        )
+
+    started = threading.Event()
+
+    def fake_classify(**kwargs):
+        started.set()
+        return _fake_result(kwargs["job_id"])
+
+    queue = JobQueue(
+        max_workers=1,
+        session_factory=session_factory,
+        classify=fake_classify,
+    )
+    queue.submit("job-queue")
+
+    assert started.wait(timeout=10)
+    queue.shutdown(wait=True)
+
+    with session_factory() as session:
+        analysis = session.get(Analysis, "job-queue")
+        assert analysis is not None
+        assert analysis.status == "completed"
+        assert analysis.progress == 100
+
+    Base.metadata.drop_all(engine)

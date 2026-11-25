@@ -8,3 +8,5 @@ Definimos um valor fictício apenas para testes; nenhum teste chama o GEE real
 import os
 
 os.environ.setdefault("GEE_PROJECT_ID", "test-project")
+# Os testes não devem tocar no Postgres real durante o lifespan do app.
+os.environ["RECOVER_STALE_JOBS"] = "false"

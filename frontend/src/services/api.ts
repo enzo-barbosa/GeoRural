@@ -6,6 +6,7 @@ import type {
   AreaCreateRequest,
   AreaUpdateRequest,
   AuthUser,
+  ClassificationPending,
   ClassifyRequest,
   ClassifyResponse,
   CoverageRequest,
@@ -114,6 +115,13 @@ export const analysesApi = {
 
   get: async (jobId: string): Promise<AnalysisDetail> => {
     const response = await api.get<AnalysisDetail>(`/analyses/${jobId}`)
+    return response.data
+  },
+
+  retry: async (jobId: string): Promise<ClassificationPending> => {
+    const response = await api.post<ClassificationPending>(
+      `/analyses/${jobId}/retry`
+    )
     return response.data
   },
 }
