@@ -158,3 +158,20 @@ export interface GeocodeResult {
 export interface GeocodeResponse {
   results: GeocodeResult[]
 }
+
+export interface AuthUser {
+  id: number
+  email: string
+  name: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface RegisterRequest extends LoginRequest {
+  name: string
+}

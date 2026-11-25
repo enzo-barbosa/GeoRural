@@ -1,8 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { AuthProvider } from '@/contexts/AuthContext'
 import { Home } from '@/pages/Home'
 import { Classify } from '@/pages/Classify'
+import { Login } from '@/pages/Login'
+import { Register } from '@/pages/Register'
 import { Results } from '@/pages/Results'
 
 const queryClient = new QueryClient({
@@ -19,8 +23,24 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/classify" element={<Classify />} />
-      <Route path="/results" element={<Results />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route
+        path="/classify"
+        element={
+          <ProtectedRoute>
+            <Classify />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/results"
+        element={
+          <ProtectedRoute>
+            <Results />
+          </ProtectedRoute>
+        }
+      />
     </Routes>
   )
 }
@@ -30,7 +50,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ErrorBoundary>
-          <AppRoutes />
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
         </ErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>

@@ -15,6 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { UserMenu } from '@/components/UserMenu'
 import { ResultMap } from '@/components/map/ResultMap'
 import type { ClassificationResult } from '@/types/api'
 import {
@@ -188,6 +189,7 @@ export function Results() {
                 <p className="text-sm text-gray-500">Job: {result.job_id}</p>
               </div>
             </div>
+            <UserMenu />
           </div>
         </div>
       </header>
