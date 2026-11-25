@@ -29,12 +29,30 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: georural
+          POSTGRES_USER: georural
+          POSTGRES_PASSWORD: georural
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U georural"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GEE_PROJECT_ID: test-project
+      DATABASE_URL: postgresql+psycopg://georural:georural@localhost:5432/georural
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv sync --frozen --all-extras
+      - run: uv run alembic upgrade head
       - run: uv run pytest -q
 
   frontend:
@@ -59,6 +77,9 @@ jobs:
     name: windows
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      GEE_PROJECT_ID: test-project
+      DATABASE_URL: sqlite://
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
