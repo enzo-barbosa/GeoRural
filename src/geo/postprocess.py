@@ -1,6 +1,5 @@
 """Pós-processamento de mapas de classificação."""
 
-import cv2
 import numpy as np
 
 
@@ -14,6 +13,8 @@ def majority_filter(
     class_map = np.asarray(class_map)
     if kernel_size <= 1 or class_map.ndim != 2:
         return class_map
+
+    import cv2
 
     if num_classes is None:
         num_classes = int(class_map.max()) + 1

@@ -3,15 +3,9 @@
 from functools import lru_cache
 from pathlib import Path
 
-import torch
 from fastapi import HTTPException
 
 from backend.app.config import get_settings
-from src.classifiers.crop_classifier import load_model as load_crop
-from src.classifiers.random_forest import load_model as load_rf
-from src.classifiers.svm import load_model as load_svm
-from src.classifiers.unet_cnn import build_unet
-from src.classifiers.unet_cnn import load_model as load_unet
 from src.gee.auth import initialize_gee
 
 # Global flag for GEE initialization
@@ -92,10 +86,20 @@ def get_cached_model(model_name: str):
         )
 
     if name in {"brazil_rf", "global_rf", "sp_rf"}:
+        from src.classifiers.random_forest import load_model as load_rf
+
         return load_rf(str(path))
     if name in {"brazil_svm", "global_svm", "sp_svm"}:
+        from src.classifiers.svm import load_model as load_svm
+
         return load_svm(str(path))
     if name == "brazil_unet":
+        # Import lazy: torch só é carregado quando a U-Net é realmente usada.
+        import torch
+
+        from src.classifiers.unet_cnn import build_unet
+        from src.classifiers.unet_cnn import load_model as load_unet
+
         state = torch.load(str(path), map_location="cpu")
         if isinstance(state, dict) and "model" in state:
             state = state["model"]
@@ -106,6 +110,8 @@ def get_cached_model(model_name: str):
         )
         return load_unet(model, str(path))
     if name == "crop":
+        from src.classifiers.crop_classifier import load_model as load_crop
+
         return load_crop(str(path))
 
     raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
