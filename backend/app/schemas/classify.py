@@ -186,6 +186,7 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded"] = "healthy"
     gee_initialized: bool
     rss_mb: float | None = None
+    peak_rss_mb: float | None = None
     system_available_mb: float | None = None
 
 
@@ -194,4 +195,5 @@ class LivenessResponse(BaseModel):
 
     status: Literal["ok"] = "ok"
     rss_mb: float
+    peak_rss_mb: float | None = None
     system_available_mb: float

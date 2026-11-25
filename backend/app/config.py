@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     MAX_CLASSIFY_PIXELS: int = 6_000_000
     MAX_DOWNLOAD_BYTES: int = 40_000_000
 
+    # Inferência: processar em chunks reduz o pico de memória do ensemble.
+    INFERENCE_CHUNK_SIZE: int = 200_000
+    UNET_BATCH_SIZE: int = 8
+
 
 @lru_cache
 def get_settings() -> Settings:

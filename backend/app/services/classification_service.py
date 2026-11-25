@@ -1,5 +1,6 @@
 """Core classification service logic."""
 
+import gc
 import json
 import os
 import tempfile
@@ -9,22 +10,19 @@ from pathlib import Path
 
 import ee
 import numpy as np
+import psutil
 import requests
 from PIL import Image
 
 from backend.app.config import get_settings
 from backend.app.dependencies.models import check_model_exists, get_cached_model
 from backend.app.services.limits import area_limit_message, bands_per_download
-from src.classifiers.crop_classifier import load_model as load_crop_model
-from src.classifiers.crop_classifier import predict_crop_map
 from src.classifiers.ensemble import (
     confidence_from_proba,
     load_weights,
     normalize_weights,
-    soft_vote,
     weights_from_metrics,
 )
-from src.classifiers.unet_cnn import predict_unet_proba
 from src.config import (
     CLASS_COLORS,
     CLASS_NAMES,
@@ -68,6 +66,19 @@ from src.geo.raster_io import read_geotiff
 from src.geo.relief import elevation_legend, make_relief_rgb
 from src.processing.features import extract_features_ee, get_feature_bands
 from src.processing.local_features import add_local_indices_array
+
+
+def predict_unet_proba(*args, **kwargs):
+    """Importa torch/U-Net apenas quando a inferência é realmente usada."""
+    from src.classifiers.unet_cnn import predict_unet_proba as _predict
+
+    return _predict(*args, **kwargs)
+
+
+def _log_memory(stage: str) -> None:
+    """Loga o RSS atual para acompanhar o pico durante a classificação."""
+    rss_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+    print(f"[memory] {stage}: {rss_mb:.1f} MB")
 
 
 def _download_ee_image(
@@ -130,6 +141,7 @@ def _download_ee_image(
         chunks.append(data)
 
     data = np.concatenate(chunks, axis=0) if len(chunks) > 1 else chunks[0]
+    del chunks
     return data, meta
 
 
@@ -288,7 +300,12 @@ def _predict_probability_maps(
     coverage: str,
     classifier_name: str,
 ) -> tuple[np.ndarray, np.ndarray | None, list[str], dict[str, float]]:
-    """Executa um modelo ou o ensemble e retorna mapa + probabilidades."""
+    """Executa um modelo ou o ensemble e retorna mapa + probabilidades.
+
+    As probabilidades são acumuladas em um único mapa ``(H, W, C)`` em float32.
+    RF/SVM são processados em chunks para não materializar mapas completos por
+    modelo e para reduzir o pico de memória do ensemble.
+    """
     height, width = image.shape[:2]
     flat = image.reshape(-1, image.shape[-1])
 
@@ -340,9 +357,26 @@ def _predict_probability_maps(
             "O modelo regional SP foi treinado apenas com Sentinel-2."
         )
 
-    probabilities: dict[str, np.ndarray] = {}
+    settings = get_settings()
+    chunk_size = max(1, int(settings.INFERENCE_CHUNK_SIZE))
+
+    if len(names) > 1:
+        if any(name.startswith("sp_") for name in names):
+            raw_weights = _load_sp_weights(names)
+        else:
+            raw_weights = _load_ensemble_weights(coverage, names)
+    else:
+        raw_weights = {}
+
+    # Pesos normalizados entre todos os modelos; se algum falhar, o acumulador
+    # é dividido pela soma dos pesos que realmente contribuíram.
+    normalized_all = normalize_weights(names, raw_weights)
+    combined = np.zeros((flat.shape[0], NUM_CLASSES), dtype=np.float32)
     used: list[str] = []
+    used_weight = 0.0
+
     for name in names:
+        weight = float(normalized_all.get(name, 0.0))
         model = get_cached_model(name)
 
         if name.endswith("_unet"):
@@ -357,6 +391,7 @@ def _predict_probability_maps(
                     patch_size=64,
                     stride=32,
                     num_classes=NUM_CLASSES,
+                    batch_size=settings.UNET_BATCH_SIZE,
                 )
             except ValueError as exc:
                 if len(names) == 1:
@@ -366,33 +401,37 @@ def _predict_probability_maps(
                     ) from exc
                 print(f"[warn] U-Net ignorada nesta classificação: {exc}")
                 continue
-            probabilities[name] = proba.reshape(height, width, NUM_CLASSES)
+
+            proba = np.asarray(proba, dtype=np.float32)
+            combined += proba.reshape(-1, NUM_CLASSES) * weight
+            del proba
         else:
             n_features = getattr(model, "n_features_in_", flat.shape[1])
-            model_flat = flat[:, :n_features]
-            proba, classes = _model_probabilities(model, model_flat)
-            aligned = _align_probabilities(proba, classes)
-            probabilities[name] = aligned.reshape(height, width, NUM_CLASSES)
+            for start in range(0, flat.shape[0], chunk_size):
+                end = min(start + chunk_size, flat.shape[0])
+                chunk = flat[start:end, :n_features]
+                proba, classes = _model_probabilities(model, chunk)
+                aligned = _align_probabilities(proba, classes)
+                combined[start:end] += aligned * weight
+                del chunk, proba, aligned
+
         used.append(name)
+        used_weight += weight
 
     if not used:
         raise RuntimeError(
             "Nenhum modelo conseguiu processar a área selecionada."
         )
 
-    if len(used) > 1:
-        if any(name.startswith("sp_") for name in used):
-            weights = _load_sp_weights(used)
-        else:
-            weights = _load_ensemble_weights(coverage, used)
-    else:
-        weights = {}
-    combined = soft_vote(probabilities, weights)
+    if used_weight > 0 and not np.isclose(used_weight, 1.0):
+        combined /= used_weight
+
+    combined = combined.reshape(height, width, NUM_CLASSES)
     pred_map = np.argmax(combined, axis=-1).astype(np.uint8)
 
     normalized = {
         name: round(value, 4)
-        for name, value in normalize_weights(used, weights).items()
+        for name, value in normalize_weights(used, raw_weights).items()
     }
     return pred_map, combined, used, normalized
 
@@ -427,9 +466,13 @@ def _classify_area_real(
 
     image = np.moveaxis(data, 0, -1)
     image = add_local_indices_array(image)
+    del data
     pred_map, probabilities, models_used, weights = _predict_probability_maps(
         image, satellite, coverage, classifier_name
     )
+    # A imagem de features (15 canais) não é mais necessária; liberar antes de
+    # gerar os PNGs reduz o pico de memória em áreas grandes.
+    del image
 
     rgb = np.moveaxis(rgb_data, 0, -1)
     return pred_map, probabilities, meta_all, rgb, models_used, weights
@@ -596,6 +639,11 @@ def _compute_crop(
     max_cloud,
 ):
     """Executa a classificação de tipo de cultivo e retorna (stats, layer)."""
+    # Imports lazy: o classificador de cultivo (sklearn/joblib) só é carregado
+    # quando a camada de cultivo é solicitada.
+    from src.classifiers.crop_classifier import load_model as load_crop_model
+    from src.classifiers.crop_classifier import predict_crop_map
+
     settings = get_settings()
     model_path = Path(settings.MODELS_DIR) / "crop_classifier.pkl"
     if not model_path.exists():
@@ -651,6 +699,7 @@ async def classify_area(
     """Main classification pipeline."""
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     job_id = f"{stamp}_{uuid.uuid4().hex[:8]}"
+    _log_memory("classify:start")
 
     geometry = polygon_to_ee_geometry(polygon_coords)
 
@@ -717,12 +766,23 @@ async def classify_area(
             "status": "failed",
             "error": "Falha ao processar imagem - dados vazios.",
         }
+    _log_memory("after inference")
 
     pred_map = np.asarray(pred_map)
     transform = meta["transform"]
     crs = meta["crs"]
     mask = polygon_mask(polygon_coords, transform, crs, pred_map.shape)
     bounds = raster_bounds_lonlat(transform, crs, pred_map.shape)
+
+    confidence_mean = None
+    if probabilities is not None and mask.any():
+        confidence = confidence_from_proba(probabilities)
+        confidence_mean = round(float(confidence[mask].mean()), 4)
+    # A confiança já foi extraída; liberar o mapa HxWxC antes de gerar PNGs e
+    # topografia reduz o pico de memória.
+    del probabilities
+    gc.collect()
+    _log_memory("after confidence")
 
     postprocessed = False
     if postprocess:
@@ -750,6 +810,7 @@ async def classify_area(
         blended[~mask] = rgb_normalized[~mask]
         overlay_img = Image.fromarray(blended, mode="RGB")
         overlay_url = _save_image(overlay_img, job_id, "overlay")
+        del rgb_image
 
     # Medidas geométricas reais
     raster_metrics = compute_raster_metrics(
@@ -763,11 +824,6 @@ async def classify_area(
         "total_pixels": int(raster_metrics["total_pixels"]),
         "parcels": int(sum(c["parcels"] for c in class_areas)),
     }
-
-    confidence_mean = None
-    if probabilities is not None and mask.any():
-        confidence = confidence_from_proba(probabilities)
-        confidence_mean = round(float(confidence[mask].mean()), 4)
 
     layers = [
         {
@@ -807,6 +863,9 @@ async def classify_area(
                 layers.append(crop_layer)
         except Exception:  # noqa: BLE001
             crop_stats = None
+
+    gc.collect()
+    _log_memory("after layers")
 
     return {
         "job_id": job_id,
