@@ -1038,11 +1038,14 @@ def predict_unet_proba(
     patch_size: int = 64,
     stride: int = 32,
     num_classes: int = NUM_CLASSES,
+    batch_size: int = 8,
 ) -> np.ndarray:
     """Aplica a U-Net e retorna probabilidades (height, width, num_classes).
 
     As probabilidades dos patches sobrepostos são acumuladas e normalizadas,
-    em vez de média de índices de classe (que era incorreta).
+    em vez de média de índices de classe (que era incorreta). Os patches são
+    processados em lotes para acelerar a inferência em CPU sem mudar o
+    resultado.
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -1050,23 +1053,41 @@ def predict_unet_proba(
 
     padded, original_h, original_w = _pad_to_grid(image, patch_size, stride)
     h, w = padded.shape[:2]
+    batch_size = max(1, int(batch_size))
 
     proba_map = np.zeros((h, w, num_classes), dtype=np.float32)
     count_map = np.zeros((h, w), dtype=np.float32)
 
-    with torch.no_grad():
-        for y in range(0, h - patch_size + 1, stride):
-            for x in range(0, w - patch_size + 1, stride):
-                patch = padded[y : y + patch_size, x : x + patch_size]
-                patch_tensor = (
-                    torch.FloatTensor(patch).permute(2, 0, 1).unsqueeze(0).to(device)
+    coordinates = [
+        (y, x)
+        for y in range(0, h - patch_size + 1, stride)
+        for x in range(0, w - patch_size + 1, stride)
+    ]
+
+    with torch.inference_mode():
+        for start in range(0, len(coordinates), batch_size):
+            batch = coordinates[start : start + batch_size]
+            patches = np.stack(
+                [
+                    padded[y : y + patch_size, x : x + patch_size]
+                    for y, x in batch
+                ]
+            )
+            patch_tensor = (
+                torch.from_numpy(patches)
+                .permute(0, 3, 1, 2)
+                .to(device=device, dtype=torch.float32)
+            )
+
+            output = model(patch_tensor)
+            probabilities = torch.softmax(output, dim=1).cpu().numpy()
+
+            for (y, x), probabilities_patch in zip(
+                batch, probabilities, strict=True
+            ):
+                proba_map[y : y + patch_size, x : x + patch_size] += np.moveaxis(
+                    probabilities_patch, 0, -1
                 )
-
-                output = model(patch_tensor)
-                probs = torch.softmax(output, dim=1)[0].cpu().numpy()
-                probs = np.moveaxis(probs, 0, -1)
-
-                proba_map[y : y + patch_size, x : x + patch_size] += probs
                 count_map[y : y + patch_size, x : x + patch_size] += 1
 
     count_map[count_map == 0] = 1
@@ -1079,6 +1100,9 @@ def predict_unet(
 ):
     """Aplica o modelo em uma imagem completa e retorna o mapa de classes."""
     probabilities = predict_unet_proba(
-        model, image, patch_size=patch_size, stride=stride
+        model,
+        image,
+        patch_size=patch_size,
+        stride=stride,
     )
     return np.argmax(probabilities, axis=-1).astype(np.uint8)
