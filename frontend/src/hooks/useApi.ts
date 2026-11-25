@@ -57,6 +57,26 @@ export function useAnalyses(limit = 20) {
   return useQuery({
     queryKey: ['analyses', limit],
     queryFn: () => analysesApi.list(limit),
+    refetchInterval: (query) => {
+      const analyses = query.state.data
+      const hasActive = analyses?.some(
+        (analysis) =>
+          analysis.status === 'queued' || analysis.status === 'running'
+      )
+      return hasActive ? 5000 : false
+    },
+  })
+}
+
+export function useRetryAnalysis() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobId: string) => analysesApi.retry(jobId),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['analyses'] })
+      queryClient.invalidateQueries({ queryKey: ['analysis', data.job_id] })
+    },
   })
 }
 

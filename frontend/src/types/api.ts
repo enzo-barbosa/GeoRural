@@ -131,7 +131,7 @@ export interface ClassificationPending {
   status: 'pending' | 'processing'
 }
 
-export type ClassifyResponse = ClassificationResult | ClassificationError | ClassificationPending
+export type ClassifyResponse = ClassificationPending
 
 export interface ModelsStatusResponse {
   brazil_rf: boolean

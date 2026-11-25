@@ -232,12 +232,6 @@ export function Classify() {
 
     try {
       const result = await classifyMutation.mutateAsync(request)
-
-      if (result.status === 'failed') {
-        setError(result.error)
-        return
-      }
-
       navigate(`/results?job_id=${result.job_id}`)
     } catch (err) {
       setError(apiErrorMessage(err, 'Erro ao classificar'))
@@ -580,12 +574,16 @@ export function Classify() {
                     {classifyMutation.isPending ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Classificando...
+                        Enviando...
                       </>
                     ) : (
                       'Classificar'
                     )}
                   </Button>
+                  <p className="mt-2 text-center text-xs text-gray-500">
+                    A classificação roda em segundo plano; você pode acompanhar
+                    pelo histórico ou sair desta página.
+                  </p>
                 </form>
               </CardContent>
             </Card>
