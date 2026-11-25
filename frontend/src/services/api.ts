@@ -1,5 +1,10 @@
 import axios from 'axios'
 import type {
+  AnalysisDetail,
+  AnalysisSummary,
+  Area,
+  AreaCreateRequest,
+  AreaUpdateRequest,
   AuthUser,
   ClassifyRequest,
   ClassifyResponse,
@@ -69,6 +74,46 @@ export const classifyApi = {
 
   getCoverage: async (request: CoverageRequest): Promise<CoverageResponse> => {
     const response = await api.post<CoverageResponse>('/classify/coverage', request)
+    return response.data
+  },
+}
+
+export const areasApi = {
+  list: async (): Promise<Area[]> => {
+    const response = await api.get<Area[]>('/areas')
+    return response.data
+  },
+
+  get: async (areaId: number): Promise<Area> => {
+    const response = await api.get<Area>(`/areas/${areaId}`)
+    return response.data
+  },
+
+  create: async (request: AreaCreateRequest): Promise<Area> => {
+    const response = await api.post<Area>('/areas', request)
+    return response.data
+  },
+
+  update: async (areaId: number, request: AreaUpdateRequest): Promise<Area> => {
+    const response = await api.patch<Area>(`/areas/${areaId}`, request)
+    return response.data
+  },
+
+  remove: async (areaId: number): Promise<void> => {
+    await api.delete(`/areas/${areaId}`)
+  },
+}
+
+export const analysesApi = {
+  list: async (limit = 20, offset = 0): Promise<AnalysisSummary[]> => {
+    const response = await api.get<AnalysisSummary[]>('/analyses', {
+      params: { limit, offset },
+    })
+    return response.data
+  },
+
+  get: async (jobId: string): Promise<AnalysisDetail> => {
+    const response = await api.get<AnalysisDetail>(`/analyses/${jobId}`)
     return response.data
   },
 }

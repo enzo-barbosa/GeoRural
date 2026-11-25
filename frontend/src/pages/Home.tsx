@@ -59,6 +59,16 @@ export function Home() {
               <Link to="/results">
                 <Button variant="ghost">Resultados</Button>
               </Link>
+              {user && (
+                <>
+                  <Link to="/areas">
+                    <Button variant="ghost">Minhas áreas</Button>
+                  </Link>
+                  <Link to="/analyses">
+                    <Button variant="ghost">Histórico</Button>
+                  </Link>
+                </>
+              )}
               {user ? (
                 <UserMenu />
               ) : (
