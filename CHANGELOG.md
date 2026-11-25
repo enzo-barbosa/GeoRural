@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/enzo-barbosa/GeoRural/compare/georural-v0.2.0...georural-v0.2.1) (2026-11-25)
+
+
+### Performance Improvements
+
+* reduce inference memory peak and batch unet patches ([#13](https://github.com/enzo-barbosa/GeoRural/issues/13)) ([4ccafe0](https://github.com/enzo-barbosa/GeoRural/commit/4ccafe0d2b02993319f8e7b0a546ca01d1d18726))
+
 ## [0.2.0](https://github.com/enzo-barbosa/GeoRural/compare/georural-v0.1.0...georural-v0.2.0) (2026-11-24)
 
 
