@@ -78,6 +78,9 @@ docker compose --profile tools run --rm download-models
 # 4. Suba tudo
 docker compose up --build
 # ou: uv run python scripts/dev.py up
+
+# 5. Aplique as migrações do banco
+uv run python scripts/dev.py migrate
 ```
 
 - Frontend: http://localhost:5173
@@ -92,6 +95,7 @@ uv run python scripts/dev.py up -d      # sobe em background
 uv run python scripts/dev.py logs backend
 uv run python scripts/dev.py test       # pytest dentro do container
 uv run python scripts/dev.py lint       # ruff dentro do container
+uv run python scripts/dev.py migrate    # alembic upgrade head
 uv run python scripts/dev.py down       # derruba
 uv run python scripts/dev.py rebuild    # reconstrói imagens e containers
 ```

@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("shell", help="Abre um shell no backend")
     sub.add_parser("psql", help="Abre o psql no banco")
     sub.add_parser("models", help="Baixa os modelos via GitHub Release")
+    sub.add_parser("migrate", help="Aplica as migrações do banco (alembic)")
 
     args = parser.parse_args(argv)
 
@@ -126,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "models":
         return _run(["--profile", "tools", "run", "--rm", "download-models"])
+
+    if args.command == "migrate":
+        return _run(["exec", "backend", "alembic", "upgrade", "head"])
 
     if args.command == "test":
         return _run(["exec", "backend", "python", "-m", "pytest", "-q"])
