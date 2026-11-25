@@ -48,7 +48,7 @@ no mesmo site. As rotas de classificação exigem sessão; `/api/health` e
 
 - JWT é stateless: o logout apaga o cookie, mas não revoga tokens já emitidos.
 - Não há rate limiting no login.
-- As imagens em `/outputs/...` ainda são servidas publicamente por URL; a
-  proteção por usuário será feita junto com a persistência das análises.
-- O frontend usa o proxy do Vite (`/api`), então o cookie funciona em
-  `localhost:5173` sem configuração extra.
+- As imagens em `/outputs/...` são servidas apenas para o dono da análise;
+  sem sessão retornam 401 e outro usuário recebe 404.
+- O frontend usa o proxy do Vite (`/api` e `/outputs`), então o cookie funciona
+  em `localhost:5173` sem configuração extra.
