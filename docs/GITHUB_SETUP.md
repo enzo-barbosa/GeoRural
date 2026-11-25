@@ -57,21 +57,56 @@ Em **Settings → Actions → General**:
 - [x] Allow all actions and reusable workflows
 - Workflow permissions: **Read repository contents and packages permissions**
   (os workflows que precisam de escrita declaram `permissions` próprias)
-- [x] Allow GitHub Actions to create and approve pull requests (necessário para
-  o Release Please)
+- [ ] **Allow GitHub Actions to create and approve pull requests**: deixe
+  **desmarcado**. O Release Please foi removido, então essa permissão não é
+  mais necessária.
 
 ## 4. Segurança
 
 Em **Settings → Code security and analysis**:
 
-- [x] Dependabot alerts
-- [x] Dependabot security updates
+- [x] Dependabot alerts (apenas na UI; sem PRs automáticos)
+- [ ] Dependabot security updates: **desligado** (atualizações manuais)
 - [x] Secret scanning
 - [x] Push protection
 - [x] CodeQL: **Advanced setup** (o workflow `codeql.yml` já está no repositório;
   não habilite o default setup para não duplicar)
 
-## 5. Release de modelos
+Para não receber email dos alertas, em **Settings pessoais → Notifications**,
+desmarque o email de “Watching” e “Dependabot alerts”. No repositório, use
+**Watch → Participating and @mentions**.
+
+## 5. Atualizações e releases manuais
+
+As atualizações de dependências e releases são feitas sob demanda:
+
+```bash
+# Python
+uv lock --upgrade
+uv sync --all-extras
+uv run pytest -q
+
+# Frontend
+cd frontend && npm update && npm audit && npm run build
+```
+
+Depois, commit e PR:
+
+```bash
+git switch -c chore/deps-update
+git add pyproject.toml uv.lock frontend/package.json frontend/package-lock.json
+git commit -m "chore(deps): update dependencies"
+```
+
+Release manual:
+
+```bash
+git tag -a v0.3.0 -m "v0.3.0"
+git push origin v0.3.0
+gh release create v0.3.0 --generate-notes
+```
+
+## 6. Release de modelos
 
 Publique a release `models-v1` com o script (mais seguro que o comando manual):
 
@@ -85,7 +120,7 @@ O `models.lock.json` aponta para
 e já contém os SHA-256. O download (`scripts/download_models.py`) valida
 tamanho e hash; confira com `--check`.
 
-## 6. Desenvolvimento local
+## 7. Desenvolvimento local
 
 Instale os hooks uma vez:
 
@@ -94,7 +129,7 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
-## 7. Fluxo resumido
+## 8. Fluxo resumido
 
 ```bash
 git switch main && git pull
@@ -106,7 +141,7 @@ gh pr create --fill
 # squash merge + delete branch
 ```
 
-## 8. Regra de ouro: um PR por vez
+## 9. Regra de ouro: um PR por vez
 
 O desenvolvimento é **sequencial**, sem PRs empilhados:
 
@@ -116,17 +151,17 @@ O desenvolvimento é **sequencial**, sem PRs empilhados:
 3. O dono revisa e faz o **squash merge**.
 4. Atualize a `main` (`git switch main && git pull`) e só então abra o próximo.
 
-Valem também para PRs automáticos (Dependabot e Release Please): um por vez,
-CI verde e merge antes de seguir. Se um PR depende de outro, aguarde o merge e
-rebaseie a branch sobre a `main`; nunca abra em cima de uma branch não mergeada.
+Valem também para qualquer PR aberto manualmente: um por vez, CI verde e merge
+antes de seguir. Se um PR depende de outro, aguarde o merge e rebaseie a branch
+sobre a `main`; nunca abra em cima de uma branch não mergeada.
 
-## 9. Problemas comuns
+## 10. Problemas comuns
 
 - **Check obrigatório não aparece**: ele só fica disponível depois de rodar ao
   menos uma vez. Abra um PR de teste.
 - **`windows` falhando**: veja o log do job; normalmente é dependência sem wheel
   ou caminho com separador errado.
-- **Release Please sem permissão**: confira a opção “Allow GitHub Actions to
-  create and approve pull requests”.
+- **Dependabot abrindo PRs**: confira em Settings → Code security se
+  “Dependabot security updates” está desligado; os alerts podem continuar na UI.
 - **Docker não sobe no Windows**: confirme que o Docker Desktop está com WSL2
   ativo e que as portas 8000/5173/5434 estão livres.

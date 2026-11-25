@@ -89,8 +89,6 @@ Regras:
 - Não empilhe PRs. Se uma tarefa depende de outra, espere o merge e rebaseie a
   branch sobre a `main`.
 - Se o CI ficou vermelho, corrija no mesmo PR; não abra outro.
-- PRs de dependências (Dependabot) e de release (Release Please) também entram
-  nessa fila, um por vez.
 
 ### Passos
 
