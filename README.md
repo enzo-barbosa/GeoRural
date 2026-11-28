@@ -22,6 +22,7 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 - **Busca por endereço ou coordenadas** (Nominatim/OSM) que centraliza o mapa no local
 - **Login/cadastro** com sessão em cookie httpOnly e senhas com Argon2
 - **Áreas salvas e histórico** de análises por usuário, com reabertura de resultados
+- **Relatório PDF completo** por análise, com mapas, distribuição das classes e topografia
 - **Classificação em segundo plano** com progresso por etapa e botão de reprocessar
 - **Memória controlada:** modelos liberados ao fim de cada análise (configurável)
 - Imagens geradas em `/outputs/...` protegidas por dono da análise
