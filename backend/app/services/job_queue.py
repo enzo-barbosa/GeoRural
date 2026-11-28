@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from fastapi import Request
@@ -201,24 +202,53 @@ class JobQueue:
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="georural-job"
         )
+        self._futures: dict[str, Future[None]] = {}
+        self._lock = threading.Lock()
 
     def submit(self, job_id: str) -> None:
         """Enfileira o job; o retorno é imediato."""
-        self._executor.submit(self._run, job_id)
+        future = self._executor.submit(self._run, job_id)
+        with self._lock:
+            self._futures[job_id] = future
+            if future.done():
+                self._futures.pop(job_id, None)
+
+    def cancel(self, job_id: str) -> bool:
+        """Cancela um job que ainda não começou; retorna ``False`` se já rodou."""
+        with self._lock:
+            future = self._futures.get(job_id)
+        if future is None:
+            return False
+
+        cancelled = future.cancel()
+        if cancelled:
+            with self._lock:
+                self._futures.pop(job_id, None)
+        return cancelled
 
     def _run(self, job_id: str) -> None:
-        with self._session_factory() as db:
-            try:
-                run_analysis_job(job_id, db, classify=self._classify)
-            except Exception:
-                logger.exception("Falha inesperada no worker do job %s", job_id)
-                _mark_failed(
-                    db, job_id, "Falha inesperada no worker de classificação"
-                )
+        try:
+            with self._session_factory() as db:
+                try:
+                    run_analysis_job(job_id, db, classify=self._classify)
+                except Exception:
+                    logger.exception(
+                        "Falha inesperada no worker do job %s", job_id
+                    )
+                    _mark_failed(
+                        db,
+                        job_id,
+                        "Falha inesperada no worker de classificação",
+                    )
+        finally:
+            with self._lock:
+                self._futures.pop(job_id, None)
 
     def shutdown(self, wait: bool = False) -> None:
         """Encerra a fila; jobs ainda na fila são descartados."""
         self._executor.shutdown(wait=wait, cancel_futures=True)
+        with self._lock:
+            self._futures.clear()
 
 
 def get_job_queue(request: Request) -> JobQueue:
