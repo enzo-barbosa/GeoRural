@@ -1,6 +1,7 @@
 """Testes de áreas, histórico, persistência da classificação e outputs."""
 
 import threading
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,32 @@ POLYGON = {
             [-50.20, -20.30],
             [-50.30, -20.30],
             [-50.30, -20.25],
+        ]
+    ],
+}
+
+BOWTIE = {
+    "type": "Polygon",
+    "coordinates": [
+        [
+            [-50.0, -20.0],
+            [-49.9, -19.9],
+            [-49.9, -20.0],
+            [-50.0, -19.9],
+            [-50.0, -20.0],
+        ]
+    ],
+}
+
+BIG_POLYGON = {
+    "type": "Polygon",
+    "coordinates": [
+        [
+            [-50.0, -20.0],
+            [-49.6, -20.0],
+            [-49.6, -19.6],
+            [-50.0, -19.6],
+            [-50.0, -20.0],
         ]
     ],
 }
@@ -129,6 +156,49 @@ def test_area_crud(client):
     deleted = client.delete(f"/api/areas/{created['id']}")
     assert deleted.status_code == 204
     assert client.get(f"/api/areas/{created['id']}").status_code == 404
+
+
+def test_area_create_normalizes_open_ring(client):
+    _register(client)
+    open_polygon = {
+        "type": "Polygon",
+        "coordinates": [POLYGON["coordinates"][0][:-1]],
+    }
+
+    response = client.post(
+        "/api/areas",
+        json={"name": "Área aberta", "polygon": open_polygon},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    ring = body["geojson"]["coordinates"][0]
+    assert ring[0] == ring[-1]
+    assert body["area_ha"] > 0
+
+
+def test_area_create_rejects_invalid_polygon(client):
+    _register(client)
+
+    response = client.post(
+        "/api/areas",
+        json={"name": "Auto-intersectada", "polygon": BOWTIE},
+    )
+
+    assert response.status_code == 422
+    assert "auto-interseção" in response.json()["detail"]
+    assert client.get("/api/areas").json() == []
+
+
+def test_area_create_rejects_blank_name(client):
+    _register(client)
+
+    response = client.post(
+        "/api/areas",
+        json={"name": "   ", "polygon": POLYGON},
+    )
+
+    assert response.status_code == 422
 
 
 def test_areas_are_isolated_between_users(client):
@@ -404,6 +474,86 @@ CLASSIFY_PAYLOAD = {
 def _submit(client, **overrides):
     payload = {**CLASSIFY_PAYLOAD, **overrides}
     return client.post("/api/classify", json=payload)
+
+
+def test_classify_rejects_inverted_dates(client, db, queue):
+    _register(client)
+
+    response = _submit(
+        client, start_date="2023-12-31", end_date="2023-01-01"
+    )
+
+    assert response.status_code == 422
+    assert queue.jobs == []
+    assert db.query(Analysis).count() == 0
+
+
+def test_classify_rejects_future_end_date(client, db, queue):
+    _register(client)
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+    response = _submit(
+        client, start_date="2023-01-01", end_date=tomorrow
+    )
+
+    assert response.status_code == 422
+    assert queue.jobs == []
+
+
+def test_classify_rejects_oversized_area(client, db, queue):
+    _register(client)
+
+    response = _submit(client, polygon=BIG_POLYGON)
+
+    assert response.status_code == 422
+    assert "excede o limite" in response.json()["detail"]
+    assert queue.jobs == []
+    assert db.query(Analysis).count() == 0
+
+
+def test_classify_rejects_invalid_polygon(client, db, queue):
+    _register(client)
+
+    response = _submit(client, polygon=BOWTIE)
+
+    assert response.status_code == 422
+    assert "auto-interseção" in response.json()["detail"]
+    assert queue.jobs == []
+    assert db.query(Analysis).count() == 0
+
+
+def test_classify_rejects_sentinel_only_classifier_for_landsat(
+    client, db, queue
+):
+    _register(client)
+
+    response = _submit(client, satellite="landsat8", classifier="unet_cnn")
+
+    assert response.status_code == 422
+    assert queue.jobs == []
+    assert db.query(Analysis).count() == 0
+
+
+def test_classify_normalizes_polygon_and_name(client, db, queue):
+    _register(client)
+    open_polygon = {
+        "type": "Polygon",
+        "coordinates": [POLYGON["coordinates"][0][:-1]],
+    }
+
+    response = _submit(
+        client, polygon=open_polygon, name="  Safra validada  "
+    )
+
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    analysis = db.get(Analysis, job_id)
+    assert analysis is not None
+    assert analysis.name == "Safra validada"
+    assert analysis.area_ha is not None
+    assert analysis.area_ha > 0
+    ring = analysis.geojson["coordinates"][0]
+    assert ring[0] == ring[-1]
 
 
 def test_classification_is_queued(client, db, queue):

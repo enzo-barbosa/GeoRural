@@ -16,7 +16,11 @@ from backend.app.db.repositories import (
 from backend.app.db.session import get_db
 from backend.app.dependencies.auth import get_current_user
 from backend.app.schemas.area import AreaCreate, AreaRead, AreaUpdate
-from src.geo.measurements import polygon_metrics
+from backend.app.services.geometry_validation import (
+    GeometryValidationError,
+    ValidatedPolygon,
+    validate_polygon,
+)
 
 router = APIRouter(prefix="/api/areas", tags=["areas"])
 
@@ -25,12 +29,15 @@ _NOT_FOUND = HTTPException(
 )
 
 
-def _area_ha(coordinates: list[list[float]]) -> float | None:
-    """Calcula a área em hectares sem derrubar o cadastro se a geometria falhar."""
+def _validated_polygon(payload: AreaCreate) -> ValidatedPolygon:
+    """Valida a geometria e devolve o GeoJSON normalizado com as medidas."""
     try:
-        return round(float(polygon_metrics(coordinates).get("area_ha", 0.0)), 4)
-    except Exception:  # noqa: BLE001
-        return None
+        return validate_polygon(payload.polygon.model_dump())
+    except GeometryValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("", response_model=list[AreaRead])
@@ -49,14 +56,14 @@ def create_user_area(
     db: Annotated[Session, Depends(get_db)],
 ) -> Area:
     """Salva um novo polígono como área do usuário."""
-    geojson = payload.polygon.model_dump()
+    validated = _validated_polygon(payload)
     return create_area(
         db,
         name=payload.name,
         description=payload.description,
-        geojson=geojson,
+        geojson=validated.geojson,
         user_id=current_user.id,
-        area_ha=_area_ha(payload.polygon.coordinates[0]),
+        area_ha=round(validated.area_ha, 4),
     )
 
 

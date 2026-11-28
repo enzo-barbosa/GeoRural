@@ -38,6 +38,11 @@ Todas as rotas exigem sessão e são isoladas por usuário.
 
 `area_ha` é calculado no backend.
 
+O polígono é validado antes de salvar: precisa ter pelo menos 3 pontos
+distintos, anel externo fechado (o backend fecha automaticamente), coordenadas
+dentro dos limites geográficos e geometria válida, sem auto-interseção.
+Polígonos inválidos retornam 422 com uma mensagem explicando o problema.
+
 ## Análises
 
 | Método | Rota | Descrição |
@@ -94,6 +99,15 @@ topografia e cultivo quando disponíveis.
   "status": "pending"
 }
 ```
+
+Antes de enfileirar, o backend valida:
+
+- geometria do polígono (mesmas regras de `/api/areas`);
+- `start_date <= end_date` e data final não futura;
+- classificadores U-Net e o ensemble regional SP apenas com Sentinel-2;
+- área compatível com `MAX_CLASSIFY_PIXELS` na resolução do satélite.
+
+Falhas de validação retornam 422 sem criar análise nem consumir a fila.
 
 O processamento roda em segundo plano, uma análise por vez. Acompanhe pelo
 detalhe da análise; detalhes da fila em [`JOBS.md`](JOBS.md).
