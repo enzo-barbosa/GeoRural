@@ -80,6 +80,18 @@ export function useRetryAnalysis() {
   })
 }
 
+export function useDeleteAnalysis() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (jobId: string) => analysesApi.remove(jobId),
+    onSuccess: (_data, jobId) => {
+      queryClient.removeQueries({ queryKey: ['analysis', jobId] })
+      queryClient.invalidateQueries({ queryKey: ['analyses'] })
+    },
+  })
+}
+
 export function useAreas() {
   return useQuery({
     queryKey: ['areas'],

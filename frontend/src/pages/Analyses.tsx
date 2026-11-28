@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AlertCircle, History, MapPin, RotateCcw } from 'lucide-react'
+import { AlertCircle, History, MapPin, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { UserMenu } from '@/components/UserMenu'
-import { useAnalyses, useRetryAnalysis } from '@/hooks/useApi'
+import { useAnalyses, useDeleteAnalysis, useRetryAnalysis } from '@/hooks/useApi'
+import { apiErrorMessage } from '@/lib/errors'
 import { formatArea, formatDateTime } from '@/lib/format'
 import { isActiveStatus, jobStageLabel } from '@/lib/jobs'
 import type { AnalysisStatus } from '@/types/api'
@@ -27,6 +28,7 @@ export function Analyses() {
   const navigate = useNavigate()
   const { data: analyses = [], isLoading, isError } = useAnalyses()
   const retryMutation = useRetryAnalysis()
+  const deleteMutation = useDeleteAnalysis()
   const [actionError, setActionError] = useState<string | null>(null)
 
   const handleRetry = async (jobId: string) => {
@@ -37,6 +39,21 @@ export function Analyses() {
     } catch {
       setActionError('Não foi possível reprocessar a análise.')
     }
+  }
+
+  const handleDelete = (jobId: string, title: string) => {
+    const confirmed = window.confirm(
+      `Excluir a análise "${title}"? Os mapas e o PDF dela também serão removidos.`
+    )
+    if (!confirmed) return
+
+    setActionError(null)
+    deleteMutation.mutate(jobId, {
+      onError: (err) =>
+        setActionError(
+          apiErrorMessage(err, 'Não foi possível excluir a análise.')
+        ),
+    })
   }
 
   return (
@@ -189,6 +206,20 @@ export function Analyses() {
                         >
                           <RotateCcw className="h-4 w-4" />
                           Reprocessar
+                        </Button>
+                      )}
+                      {analysis.status !== 'running' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            handleDelete(analysis.id, title)
+                          }
+                          disabled={deleteMutation.isPending}
+                          className="gap-1.5 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Excluir
                         </Button>
                       )}
                     </div>
