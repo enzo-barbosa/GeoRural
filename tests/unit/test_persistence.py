@@ -204,6 +204,113 @@ def test_analysis_history_is_isolated(client, db):
     assert client.get("/api/analyses/job-a").status_code == 404
 
 
+# ------------------------------- relatório ---------------------------------
+
+
+def _seed_report(db, user_id, tmp_path, job_id="job-report", **overrides):
+    result = _fake_result(job_id)
+    result["topography"] = {
+        "dem_source": "NASADEM",
+        "dem_resolution_m": 30,
+        "elevation_min": 500.0,
+        "elevation_max": 620.0,
+        "elevation_mean": 560.0,
+        "relief_m": 120.0,
+        "slope_min": 0.1,
+        "slope_mean": 4.2,
+        "slope_max": 12.5,
+        "dominant_class": "Suave ondulado",
+        "classes": [
+            {"class_name": "Plano", "area_ha": 3.0, "percent": 24.0},
+            {"class_name": "Suave ondulado", "area_ha": 9.5, "percent": 76.0},
+        ],
+    }
+    result["crop_stats"] = [
+        {"class_name": "Soja", "area_ha": 8.0, "percent": 64.0},
+        {"class_name": "Milho", "area_ha": 4.5, "percent": 36.0},
+    ]
+    analysis = _seed_analysis(
+        db,
+        user_id,
+        job_id=job_id,
+        result=result,
+        **overrides,
+    )
+
+    from PIL import Image
+
+    output_dir = Path(tmp_path) / job_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for filename in (
+        "classification.png",
+        "rgb.png",
+        "overlay.png",
+        "relief.png",
+        "crop.png",
+    ):
+        Image.new("RGB", (80, 60), "green").save(output_dir / filename)
+    return analysis
+
+
+def test_report_pdf_for_owner(client, db, tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_report(db, user["id"], tmp_path)
+
+    response = client.get("/api/analyses/job-report/report.pdf")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert "georural_job-report.pdf" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF")
+    assert len(response.content) > 1000
+
+
+def test_report_works_without_optional_images(client, db, tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-sem-imagens")
+
+    response = client.get("/api/analyses/job-sem-imagens/report.pdf")
+
+    assert response.status_code == 200, response.text
+    assert response.content.startswith(b"%PDF")
+
+
+def test_report_requires_completed_analysis(client, db, tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-running", status="running")
+    _seed_analysis(db, user["id"], job_id="job-failed", status="failed")
+
+    assert (
+        client.get("/api/analyses/job-running/report.pdf").status_code == 409
+    )
+    assert (
+        client.get("/api/analyses/job-failed/report.pdf").status_code == 409
+    )
+
+
+def test_report_is_protected_by_owner(client, db, tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_report(db, user["id"], tmp_path, job_id="job-privado")
+
+    client.post("/api/auth/logout")
+    assert client.get("/api/analyses/job-privado/report.pdf").status_code == 401
+
+    _register(client, email="outro@example.com", name="Outro")
+    assert client.get("/api/analyses/job-privado/report.pdf").status_code == 404
+
+
 # ------------------------------- outputs -----------------------------------
 
 
