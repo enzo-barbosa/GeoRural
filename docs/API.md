@@ -51,6 +51,7 @@ Polígonos inválidos retornam 422 com uma mensagem explicando o problema.
 | GET | `/api/analyses/{job_id}` | detalhe com `result` completo |
 | GET | `/api/analyses/{job_id}/report.pdf` | relatório PDF da análise |
 | POST | `/api/analyses/{job_id}/retry` | reprocessa com os mesmos parâmetros |
+| DELETE | `/api/analyses/{job_id}` | remove a análise e seus arquivos |
 
 Cada chamada a `POST /api/classify` cria automaticamente um registro em
 `analyses` com status `queued`. O worker muda para `running`, atualiza
@@ -73,6 +74,19 @@ topografia e cultivo quando disponíveis.
 - `404` para análise inexistente ou de outro usuário;
 - `409` se a análise ainda não estiver `completed` ou não tiver resultado;
 - imagens ausentes são omitidas sem quebrar o PDF.
+
+### Excluir análise
+
+`DELETE /api/analyses/{job_id}` remove a análise do histórico e a pasta
+`outputs/<job_id>`.
+
+- `completed`/`failed`: responde 204 e apaga linha + arquivos;
+- `queued`: tenta cancelar o job ainda na fila; se cancelar, responde 204;
+- `running`: retorna 409, pois não há cancelamento seguro no meio do pipeline;
+- análise de outro usuário: 404;
+- falha ao remover arquivos: 500 e a linha permanece para nova tentativa.
+
+Jobs em execução precisam terminar antes de serem excluídos.
 
 ## Classificação
 

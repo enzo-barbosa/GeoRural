@@ -49,6 +49,19 @@ Jobs enviados enquanto outro roda ficam em `queued` e começam em seguida.
 `POST /api/analyses/{job_id}/retry` copia o polígono e os parâmetros da análise
 original e enfileira um novo job. A análise antiga é preservada.
 
+## Excluir e cancelar
+
+`DELETE /api/analyses/{job_id}`:
+
+- análise `completed`/`failed`: remove a linha e a pasta de outputs;
+- análise `queued`: cancela o `Future` ainda não iniciado e remove a linha;
+- análise `running`: retorna 409. O pipeline só pode ser interrompido com um
+  cancelamento cooperativo, que ainda não existe;
+- o job é isolado por usuário: outra conta recebe 404.
+
+Se o worker já tiver pegado o job no instante do cancelamento, o endpoint
+retorna 409 e a análise continua normalmente.
+
 ## Restart e jobs órfãos
 
 A fila vive na memória do processo. Se o servidor reiniciar:
@@ -87,6 +100,7 @@ curl -s http://localhost:8000/api/health/live
 
 - Sem Redis/Celery: a fila não é compartilhada entre processos e não sobrevive
   a restart.
-- Não há cancelamento de job em andamento.
+- Não há cancelamento de job em execução; jobs ainda na fila podem ser
+  excluídos.
 - Em desenvolvimento, o `--reload` do Uvicorn interrompe o job ao salvar
   arquivos.
