@@ -11,6 +11,7 @@ export const STAGE_LABELS: Record<string, string> = {
   downloading: 'Baixando imagens',
   preprocessing: 'Pré-processando',
   features: 'Extraindo atributos',
+  loading_models: 'Carregando modelos',
   inference: 'Classificando pixels',
   postprocessing: 'Pós-processando',
   saving_layers: 'Gerando camadas',
