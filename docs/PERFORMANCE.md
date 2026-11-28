@@ -34,6 +34,33 @@ probabilidade para comparar execuções.
   probabilidades são liberados antes de gerar PNGs/topografia/cultivo.
 - **cv2 lazy** em medições e pós-processamento.
 
+## Downloads do GEE
+
+O `getDownloadURL` devolve um GeoTIFF temporário por grupo de bandas. Para
+evitar jobs perdidos por instabilidade de rede e reduzir o pico de memória:
+
+- chamadas `getDownloadURL`, `bandNames().getInfo()`, `size().getInfo()`,
+  `geometry.area().getInfo()` e detecção de cobertura têm retry para erros
+  transitórios (timeout, conexão, 429 e 5xx);
+- o download HTTP usa `stream=True` e grava em blocos de 1 MB, sem manter o
+  TIFF inteiro em memória;
+- o arquivo temporário é removido em `finally`, inclusive em retry e erro de
+  leitura;
+- as bandas são copiadas direto para um array pré-alocado
+  `(bandas, altura, largura)` em vez de acumular chunks e chamar
+  `np.concatenate`, reduzindo o pico em downloads multi-banda.
+
+Configuração opcional no `.env`:
+
+```env
+GEE_MAX_ATTEMPTS=3
+GEE_RETRY_BACKOFF_SECONDS=1.5
+DOWNLOAD_TIMEOUT_SECONDS=300
+```
+
+`GEE_MAX_ATTEMPTS=1` desliga os retries; o backoff é exponencial
+(1,5 s, 3 s, …).
+
 ## Configuração
 
 ```env

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -100,6 +101,111 @@ def _report_progress(
         logger.exception("Falha ao reportar progresso da etapa %s", stage)
 
 
+_RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+_TRANSIENT_GEE_MARKERS = (
+    "timeout",
+    "timed out",
+    "connection",
+    "temporarily",
+    "rate limit",
+    "too many requests",
+    "service unavailable",
+    "capacity",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+)
+
+
+def _retry_config() -> tuple[int, float]:
+    """Quantidade de tentativas e base do backoff exponencial."""
+    settings = get_settings()
+    attempts = max(1, int(settings.GEE_MAX_ATTEMPTS))
+    backoff = max(0.0, float(settings.GEE_RETRY_BACKOFF_SECONDS))
+    return attempts, backoff
+
+
+def _is_retryable_download_error(exc: requests.RequestException) -> bool:
+    """Diz se um erro HTTP vale a pena tentar de novo."""
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        return (
+            response is not None
+            and response.status_code in _RETRYABLE_HTTP_STATUS
+        )
+    return isinstance(exc, requests.RequestException)
+
+
+def _is_transient_gee_error(exc: Exception) -> bool:
+    """Reconhece erros transitórios do Earth Engine pela mensagem."""
+    text = str(exc).lower()
+    return any(marker in text for marker in _TRANSIENT_GEE_MARKERS)
+
+
+def _gee_call[T](description: str, call: Callable[[], T]) -> T:
+    """Executa uma chamada GEE com retry para erros transitórios."""
+    attempts, backoff = _retry_config()
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except Exception as exc:
+            if attempt >= attempts or not _is_transient_gee_error(exc):
+                raise
+            logger.warning(
+                "GEE falhou em %s (tentativa %d/%d): %s",
+                description,
+                attempt,
+                attempts,
+                exc,
+            )
+            time.sleep(backoff * (2 ** (attempt - 1)))
+
+    raise RuntimeError(f"Falha inesperada ao executar {description}.")
+
+
+def _download_geotiff(url: str) -> str:
+    """Baixa um GeoTIFF para um arquivo temporário, com retry e streaming."""
+    settings = get_settings()
+    attempts, backoff = _retry_config()
+    timeout = max(1, int(settings.DOWNLOAD_TIMEOUT_SECONDS))
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        tmp_path: str | None = None
+        try:
+            with requests.get(
+                url, timeout=timeout, stream=True
+            ) as response:
+                response.raise_for_status()
+                fd, tmp_path = tempfile.mkstemp(suffix=".tif")
+                with os.fdopen(fd, "wb") as file:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            file.write(chunk)
+                return tmp_path
+        except requests.RequestException as exc:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
+            last_error = exc
+            if attempt >= attempts or not _is_retryable_download_error(exc):
+                raise
+            logger.warning(
+                "Download do GEE falhou (tentativa %d/%d): %s",
+                attempt,
+                attempts,
+                exc,
+            )
+            time.sleep(backoff * (2 ** (attempt - 1)))
+        except Exception:
+            if tmp_path is not None:
+                Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+    raise RuntimeError("Falha ao baixar imagem do GEE.") from last_error
+
+
 def _download_ee_image(
     image: ee.Image,
     geometry,
@@ -117,7 +223,9 @@ def _download_ee_image(
     if bandas:
         image = image.select(bandas)
 
-    bands = image.bandNames().getInfo()
+    bands = _gee_call(
+        "listar bandas", lambda: image.bandNames().getInfo()
+    )
     if not bands:
         return None, None
 
@@ -125,42 +233,71 @@ def _download_ee_image(
     max_bytes = settings.MAX_DOWNLOAD_BYTES
 
     if estimated_pixels is None:
-        area_m2 = geometry.area(maxError=1).getInfo()
+        area_m2 = _gee_call(
+            "calcular área",
+            lambda: geometry.area(maxError=1).getInfo(),
+        )
         estimated_pixels = max(int(area_m2 / (scale * scale)), 1)
 
     bands_per_chunk = min(
         bands_per_download(estimated_pixels, max_bytes), len(bands)
     )
 
-    chunks = []
+    groups = list(range(0, len(bands), bands_per_chunk))
+    single_group = len(groups) == 1
+    data: np.ndarray | None = None
     meta = None
+    offset = 0
 
-    for i in range(0, len(bands), bands_per_chunk):
-        group = bands[i : i + bands_per_chunk]
-        url = image.select(group).getDownloadURL(
-            {
-                "region": geometry,
-                "scale": scale,
-                "format": "GEO_TIFF",
-                "maxPixels": 1_000_000_000,
-            }
+    for start in groups:
+        group = bands[start : start + bands_per_chunk]
+        url = _gee_call(
+            "gerar URL de download",
+            lambda group=group: image.select(group).getDownloadURL(
+                {
+                    "region": geometry,
+                    "scale": scale,
+                    "format": "GEO_TIFF",
+                    "maxPixels": 1_000_000_000,
+                }
+            ),
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-            response = requests.get(url, timeout=300)
-            response.raise_for_status()
-            tmp.write(response.content)
-            tmp_path = tmp.name
-
-        data, chunk_meta = read_geotiff(tmp_path)
-        os.unlink(tmp_path)
+        tmp_path = _download_geotiff(url)
+        try:
+            chunk, chunk_meta = read_geotiff(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
 
         if meta is None:
             meta = chunk_meta
-        chunks.append(data)
+        if single_group:
+            return chunk, chunk_meta
 
-    data = np.concatenate(chunks, axis=0) if len(chunks) > 1 else chunks[0]
-    del chunks
+        if data is None:
+            data = np.empty(
+                (len(bands), *chunk.shape[1:]), dtype=chunk.dtype
+            )
+        if chunk.shape[1:] != data.shape[1:] or chunk.dtype != data.dtype:
+            raise RuntimeError(
+                "O GEE retornou bandas com grades ou tipos diferentes."
+            )
+
+        end = offset + chunk.shape[0]
+        if end > data.shape[0]:
+            raise RuntimeError(
+                "O GEE retornou mais bandas do que o esperado."
+            )
+        data[offset:end] = chunk
+        offset = end
+        del chunk
+
+    if data is None:
+        return None, None
+    if offset != data.shape[0]:
+        raise RuntimeError(
+            "O GEE retornou menos bandas do que o esperado."
+        )
     return data, meta
 
 
@@ -756,7 +893,10 @@ def classify_area(
 
     _report_progress(on_progress, "coverage", 15)
     try:
-        coverage = get_coverage(polygon_coords)
+        coverage = _gee_call(
+            "detectar cobertura",
+            lambda: get_coverage(polygon_coords),
+        )
     except Exception as exc:  # noqa: BLE001
         return {
             "job_id": job_id,
@@ -769,7 +909,9 @@ def classify_area(
 
     _report_progress(on_progress, "searching_images", 20)
     collection = search_images(geometry, start_date, end_date, satellite, max_cloud)
-    num_images = collection.size().getInfo()
+    num_images = _gee_call(
+        "contar imagens", lambda: collection.size().getInfo()
+    )
     _report_progress(on_progress, "searching_images", 25)
 
     if num_images == 0:

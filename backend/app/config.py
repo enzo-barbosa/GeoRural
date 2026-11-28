@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Limites para não estourar a memória nem o getDownloadURL do GEE.
     MAX_CLASSIFY_PIXELS: int = 6_000_000
     MAX_DOWNLOAD_BYTES: int = 40_000_000
+    # Retry e timeout para chamadas transitórias do GEE e downloads HTTP.
+    GEE_MAX_ATTEMPTS: int = 3
+    GEE_RETRY_BACKOFF_SECONDS: float = 1.5
+    DOWNLOAD_TIMEOUT_SECONDS: int = 300
 
     # Inferência: processar em chunks reduz o pico de memória do ensemble.
     INFERENCE_CHUNK_SIZE: int = 200_000
