@@ -118,6 +118,13 @@ export const analysesApi = {
     return response.data
   },
 
+  report: async (jobId: string): Promise<Blob> => {
+    const response = await api.get<Blob>(`/analyses/${jobId}/report.pdf`, {
+      responseType: 'blob',
+    })
+    return response.data
+  },
+
   retry: async (jobId: string): Promise<ClassificationPending> => {
     const response = await api.post<ClassificationPending>(
       `/analyses/${jobId}/retry`

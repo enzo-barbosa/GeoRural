@@ -44,6 +44,7 @@ Todas as rotas exigem sessão e são isoladas por usuário.
 |---|---|---|
 | GET | `/api/analyses?limit=20&offset=0` | histórico do usuário |
 | GET | `/api/analyses/{job_id}` | detalhe com `result` completo |
+| GET | `/api/analyses/{job_id}/report.pdf` | relatório PDF da análise |
 | POST | `/api/analyses/{job_id}/retry` | reprocessa com os mesmos parâmetros |
 
 Cada chamada a `POST /api/classify` cria automaticamente um registro em
@@ -56,6 +57,17 @@ enquanto `status` for `queued` ou `running`.
 `POST /api/analyses/{job_id}/retry` cria uma nova análise (novo `job_id`) com
 o polígono e os parâmetros da original, sem alterar a antiga. Retorna 409 se a
 original ainda estiver em andamento ou não tiver polígono salvo.
+
+### Relatório PDF
+
+`GET /api/analyses/{job_id}/report.pdf` gera o relatório sob demanda e devolve
+`application/pdf` com `Content-Disposition: attachment`. Inclui resumo,
+medidas, mapa de classificação, distribuição das classes, imagens da área,
+topografia e cultivo quando disponíveis.
+
+- `404` para análise inexistente ou de outro usuário;
+- `409` se a análise ainda não estiver `completed` ou não tiver resultado;
+- imagens ausentes são omitidas sem quebrar o PDF.
 
 ## Classificação
 

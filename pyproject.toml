@@ -61,6 +61,7 @@ backend = [
     "pwdlib[argon2]>=0.2",
     "pyjwt>=2.8",
     "email-validator>=2.1",
+    "reportlab>=4.2",
 ]
 
 [tool.uv]

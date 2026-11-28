@@ -13,6 +13,8 @@ import {
   Sprout,
   RotateCcw,
   History,
+  FileText,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +22,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { UserMenu } from '@/components/UserMenu'
 import { ResultMap } from '@/components/map/ResultMap'
 import { useAnalysis, useRetryAnalysis } from '@/hooks/useApi'
+import { analysesApi } from '@/services/api'
 import { jobStageLabel } from '@/lib/jobs'
 import {
   BarChart,
@@ -88,6 +91,8 @@ export function Results() {
   const { data: analysis, isLoading, isError } = useAnalysis(jobId)
   const retryMutation = useRetryAnalysis()
   const [retryError, setRetryError] = useState<string | null>(null)
+  const [isReportLoading, setIsReportLoading] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
   const result = analysis?.result ?? null
 
   if (isLoading) {
@@ -251,6 +256,26 @@ export function Results() {
     a.download = `resultado_classificacao_${result.job_id}.csv`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadReport = async () => {
+    setIsReportLoading(true)
+    setReportError(null)
+    try {
+      const blob = await analysesApi.report(result.job_id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `relatorio_${result.job_id}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      setReportError('Não foi possível gerar o relatório PDF.')
+    } finally {
+      setIsReportLoading(false)
+    }
   }
 
   const handleDownloadPNG = (imageUrl: string, filename: string) => {
@@ -798,9 +823,27 @@ export function Results() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-4">
-              <Button onClick={handleDownloadCSV} className="gap-2">
+              <Button
+                onClick={handleDownloadReport}
+                disabled={isReportLoading}
+                className="gap-2"
+              >
+                {isReportLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileText className="h-4 w-4" />
+                )}
+                {isReportLoading
+                  ? 'Gerando PDF...'
+                  : 'Baixar Relatório (PDF)'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleDownloadCSV}
+                className="gap-2"
+              >
                 <Download className="h-4 w-4" />
-                Baixar Relatório (CSV)
+                Baixar Dados (CSV)
               </Button>
               <Button
                 variant="outline"
@@ -831,6 +874,9 @@ export function Results() {
                 </Button>
               )}
             </div>
+            {reportError && (
+              <p className="mt-3 text-sm text-red-600">{reportError}</p>
+            )}
           </CardContent>
         </Card>
       </main>

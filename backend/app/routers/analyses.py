@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.app.db.models import Analysis, User
@@ -22,6 +22,7 @@ from backend.app.services.job_queue import (
     enqueue_job,
     get_job_queue,
 )
+from backend.app.services.report_service import build_analysis_report
 
 router = APIRouter(prefix="/api/analyses", tags=["analyses"])
 
@@ -94,6 +95,36 @@ def get_user_analysis(
             status_code=status.HTTP_404_NOT_FOUND, detail="Análise não encontrada"
         )
     return _analysis_read(analysis)
+
+
+@router.get("/{job_id}/report.pdf", response_class=Response)
+def download_analysis_report(
+    job_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """Gera e entrega o relatório PDF de uma análise concluída."""
+    analysis = get_analysis_for_user(db, job_id, current_user.id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Análise não encontrada"
+        )
+    if analysis.status != "completed" or not analysis.result:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A análise ainda não foi concluída.",
+        )
+
+    pdf = build_analysis_report(analysis, user_name=current_user.name)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="georural_{analysis.id}.pdf"'
+            )
+        },
+    )
 
 
 @router.post(
