@@ -1,5 +1,6 @@
 """Rotas de histórico e detalhe das análises do usuário."""
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend.app.db.models import Analysis, User
 from backend.app.db.repositories import (
     create_analysis,
+    delete_analysis,
     get_analysis_for_user,
     list_analyses,
 )
@@ -22,7 +24,10 @@ from backend.app.services.job_queue import (
     enqueue_job,
     get_job_queue,
 )
+from backend.app.services.output_files import delete_output_directory
 from backend.app.services.report_service import build_analysis_report
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analyses", tags=["analyses"])
 
@@ -124,6 +129,64 @@ def download_analysis_report(
                 f'attachment; filename="georural_{analysis.id}.pdf"'
             )
         },
+    )
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_user_analysis(
+    job_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> None:
+    """Remove uma análise, seus arquivos e cancela o job se ainda estiver na fila."""
+    analysis = get_analysis_for_user(db, job_id, current_user.id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Análise não encontrada"
+        )
+
+    analysis_id = str(analysis.id)
+
+    if analysis.status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A análise está em processamento e não pode ser excluída.",
+        )
+
+    if analysis.status == "queued":
+        if not queue.cancel(analysis_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "A análise já começou a ser processada ou não está mais "
+                    "na fila."
+                ),
+            )
+        # O job nem chegou a rodar; a linha pode sair antes dos arquivos.
+        delete_analysis(db, analysis)
+        try:
+            delete_output_directory(analysis_id)
+        except OSError:
+            logger.exception(
+                "Falha ao remover arquivos parciais do job %s", job_id
+            )
+        return
+
+    try:
+        deleted_files = delete_output_directory(analysis_id)
+    except OSError as exc:
+        logger.exception("Falha ao remover arquivos do job %s", job_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Não foi possível remover os arquivos da análise.",
+        ) from exc
+
+    delete_analysis(db, analysis)
+    logger.info(
+        "Análise %s removida do histórico (arquivos removidos: %s)",
+        job_id,
+        deleted_files,
     )
 
 

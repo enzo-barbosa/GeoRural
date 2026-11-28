@@ -84,9 +84,15 @@ class RecordingQueue:
 
     def __init__(self) -> None:
         self.jobs: list[str] = []
+        self.cancelled: list[str] = []
+        self.cancel_result = True
 
     def submit(self, job_id: str) -> None:
         self.jobs.append(job_id)
+
+    def cancel(self, job_id: str) -> bool:
+        self.cancelled.append(job_id)
+        return self.cancel_result and job_id in self.jobs
 
 
 @pytest.fixture()
@@ -779,6 +785,127 @@ def test_retry_rejects_foreign_analysis(client, db, queue):
     assert response.status_code == 404
 
 
+# ----------------------- exclusão de análises ------------------------------
+
+
+def test_delete_completed_analysis_removes_outputs(
+    client, db, tmp_path, monkeypatch
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-delete")
+    output_dir = Path(tmp_path) / "job-delete"
+    output_dir.mkdir(parents=True)
+    (output_dir / "classification.png").write_bytes(b"png")
+
+    response = client.delete("/api/analyses/job-delete")
+
+    assert response.status_code == 204
+    assert db.get(Analysis, "job-delete") is None
+    assert not output_dir.exists()
+    assert client.get("/api/analyses/job-delete").status_code == 404
+
+
+def test_delete_analysis_without_outputs(client, db, tmp_path, monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-sem-arquivos")
+
+    response = client.delete("/api/analyses/job-sem-arquivos")
+
+    assert response.status_code == 204
+    assert db.get(Analysis, "job-sem-arquivos") is None
+
+
+def test_delete_failed_analysis(client, db):
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-falha", status="failed")
+
+    response = client.delete("/api/analyses/job-falha")
+
+    assert response.status_code == 204
+    assert db.get(Analysis, "job-falha") is None
+
+
+def test_delete_queued_analysis_cancels_job(client, db, queue):
+    _register(client)
+    job_id = _submit(client).json()["job_id"]
+    assert queue.jobs == [job_id]
+
+    response = client.delete(f"/api/analyses/{job_id}")
+
+    assert response.status_code == 204
+    assert queue.cancelled == [job_id]
+    assert db.get(Analysis, job_id) is None
+
+
+def test_delete_queued_analysis_conflicts_when_started(client, db, queue):
+    _register(client)
+    job_id = _submit(client).json()["job_id"]
+    queue.cancel_result = False
+
+    response = client.delete(f"/api/analyses/{job_id}")
+
+    assert response.status_code == 409
+    assert db.get(Analysis, job_id) is not None
+
+
+def test_delete_running_analysis_conflicts(client, db, queue):
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-running-del", status="running")
+
+    response = client.delete("/api/analyses/job-running-del")
+
+    assert response.status_code == 409
+    assert db.get(Analysis, "job-running-del") is not None
+
+
+def test_delete_analysis_is_owner_scoped(client, db):
+    first = _register(client, email="a@example.com", name="A")
+    _seed_analysis(db, first["id"], job_id="job-dono")
+    client.post("/api/auth/logout")
+    _register(client, email="b@example.com", name="B")
+
+    response = client.delete("/api/analyses/job-dono")
+
+    assert response.status_code == 404
+    assert db.get(Analysis, "job-dono") is not None
+
+
+def test_delete_analysis_file_error_preserves_row(
+    client, db, tmp_path, monkeypatch
+):
+    from backend.app.services import output_files
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "OUTPUTS_DIR", str(tmp_path))
+
+    user = _register(client)
+    _seed_analysis(db, user["id"], job_id="job-erro-arquivo")
+    output_dir = Path(tmp_path) / "job-erro-arquivo"
+    output_dir.mkdir(parents=True)
+
+    def fail_rmtree(path):
+        raise OSError("sem permissão")
+
+    monkeypatch.setattr(output_files.shutil, "rmtree", fail_rmtree)
+
+    response = client.delete("/api/analyses/job-erro-arquivo")
+
+    assert response.status_code == 500
+    assert db.get(Analysis, "job-erro-arquivo") is not None
+
+
+def test_delete_missing_analysis(client, db):
+    _register(client)
+
+    assert client.delete("/api/analyses/inexistente").status_code == 404
+
+
 def test_mark_interrupted_jobs(db):
     create_analysis(
         db,
@@ -861,5 +988,68 @@ def test_job_queue_runs_submitted_job():
         assert analysis is not None
         assert analysis.status == "completed"
         assert analysis.progress == 100
+
+    Base.metadata.drop_all(engine)
+
+
+def test_job_queue_cancel_unknown_job():
+    queue = JobQueue(max_workers=1)
+
+    assert queue.cancel("nao-existe") is False
+    queue.shutdown()
+
+
+def test_job_queue_cancels_pending_job():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+    with session_factory() as session:
+        for job_id in ("job-primeiro", "job-segundo"):
+            create_analysis(
+                session,
+                job_id=job_id,
+                satellite="sentinel2",
+                classifier="auto",
+                geojson=POLYGON,
+                start_date="2023-01-01",
+                end_date="2023-12-31",
+                status="queued",
+                stage="queued",
+            )
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_classify(**kwargs):
+        if kwargs["job_id"] == "job-primeiro":
+            started.set()
+            assert release.wait(timeout=10)
+        return _fake_result(kwargs["job_id"])
+
+    queue = JobQueue(
+        max_workers=1,
+        session_factory=session_factory,
+        classify=fake_classify,
+    )
+    queue.submit("job-primeiro")
+    assert started.wait(timeout=10)
+
+    queue.submit("job-segundo")
+    assert queue.cancel("job-segundo") is True
+    assert queue.cancel("job-primeiro") is False
+
+    release.set()
+    queue.shutdown(wait=True)
+
+    with session_factory() as session:
+        first = session.get(Analysis, "job-primeiro")
+        second = session.get(Analysis, "job-segundo")
+        assert first is not None and first.status == "completed"
+        assert second is not None and second.status == "queued"
 
     Base.metadata.drop_all(engine)

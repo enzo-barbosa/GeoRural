@@ -131,6 +131,10 @@ export const analysesApi = {
     )
     return response.data
   },
+
+  remove: async (jobId: string): Promise<void> => {
+    await api.delete(`/analyses/${jobId}`)
+  },
 }
 
 export const healthApi = {

@@ -24,6 +24,7 @@ Aplicação para classificação do uso e cobertura do solo em propriedades rura
 - **Áreas salvas e histórico** de análises por usuário, com reabertura de resultados
 - **Relatório PDF completo** por análise, com mapas, distribuição das classes e topografia
 - **Classificação em segundo plano** com progresso por etapa e botão de reprocessar
+- **Exclusão de análises** com remoção dos mapas e limpeza de arquivos órfãos
 - **Memória controlada:** modelos liberados ao fim de cada análise (configurável)
 - Imagens geradas em `/outputs/...` protegidas por dono da análise
 
@@ -124,6 +125,7 @@ Documentação da API, autenticação e banco:
 - [`docs/AUTH.md`](docs/AUTH.md) — sessão, cookie e configuração do JWT
 - [`docs/DATABASE.md`](docs/DATABASE.md) — schema e migrações
 - [`docs/JOBS.md`](docs/JOBS.md) — fila em processo, etapas e recuperação
+- [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) — limpeza de outputs e backup
 
 ## Uso
 

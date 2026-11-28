@@ -158,6 +158,12 @@ def get_analysis(db: Session, job_id: str) -> Analysis | None:
     return db.get(Analysis, job_id)
 
 
+def delete_analysis(db: Session, analysis: Analysis) -> None:
+    """Remove uma análise do histórico (os arquivos são tratados pela rota)."""
+    db.delete(analysis)
+    db.commit()
+
+
 def update_analysis_status(
     db: Session,
     analysis: Analysis,
