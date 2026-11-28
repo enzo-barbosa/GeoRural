@@ -318,6 +318,7 @@ def _predict_probability_maps(
     satellite: str,
     coverage: str,
     classifier_name: str,
+    on_progress: ProgressCallback | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None, list[str], dict[str, float]]:
     """Executa um modelo ou o ensemble e retorna mapa + probabilidades.
 
@@ -394,9 +395,15 @@ def _predict_probability_maps(
     used: list[str] = []
     used_weight = 0.0
 
+    # Carrega todos os modelos antes da inferência para o frontend mostrar
+    # "Carregando modelos" quando o cache foi liberado no job anterior.
+    _report_progress(on_progress, "loading_models", 62)
+    models = {name: get_cached_model(name) for name in names}
+    _report_progress(on_progress, "inference", 70)
+
     for name in names:
         weight = float(normalized_all.get(name, 0.0))
-        model = get_cached_model(name)
+        model = models[name]
 
         if name.endswith("_unet"):
             if satellite != "sentinel2":
@@ -461,10 +468,12 @@ def _classify_area_real(
     coverage: str,
     classifier_name: str,
     estimated_pixels: int | None = None,
+    on_progress: ProgressCallback | None = None,
 ):
     """Apply trained model(s) to image and return maps, RGB and metadata."""
     scale = 10 if satellite == "sentinel2" else 30
 
+    _report_progress(on_progress, "downloading", 58)
     rgb_img = _get_rgb_composite(composite, satellite)
     rgb_data, _ = _download_ee_image(
         rgb_img,
@@ -487,7 +496,7 @@ def _classify_area_real(
     image = add_local_indices_array(image)
     del data
     pred_map, probabilities, models_used, weights = _predict_probability_maps(
-        image, satellite, coverage, classifier_name
+        image, satellite, coverage, classifier_name, on_progress=on_progress
     )
     # A imagem de features (15 canais) não é mais necessária; liberar antes de
     # gerar os PNGs reduz o pico de memória em áreas grandes.
@@ -777,7 +786,6 @@ def classify_area(
     _report_progress(on_progress, "features", 55)
     composite = extract_features_ee(composite, satellite)
 
-    _report_progress(on_progress, "inference", 65)
     try:
         pred_map, probabilities, meta, rgb_image, models_used, weights = (
             _classify_area_real(
@@ -786,6 +794,7 @@ def classify_area(
                 coverage,
                 classifier_name,
                 estimated_pixels=estimated_pixels,
+                on_progress=on_progress,
             )
         )
     except Exception as exc:  # noqa: BLE001

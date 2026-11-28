@@ -66,10 +66,17 @@ def test_probability_maps_accumulate_in_chunks(monkeypatch):
     monkeypatch.setattr(service, "predict_unet_proba", fail_unet)
 
     image = np.ones((2, 3, 15), dtype=np.float32)
+    stages: list[tuple[str, int]] = []
     pred, proba, used, weights = service._predict_probability_maps(
-        image, "sentinel2", "brazil", "auto"
+        image,
+        "sentinel2",
+        "brazil",
+        "auto",
+        on_progress=lambda stage, progress: stages.append((stage, progress)),
     )
 
+    assert ("loading_models", 62) in stages
+    assert ("inference", 70) in stages
     assert used == ["brazil_rf", "brazil_svm"]
     assert pred.shape == (2, 3)
     assert proba.shape == (2, 3, 6)

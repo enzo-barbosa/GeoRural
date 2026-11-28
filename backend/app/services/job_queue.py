@@ -11,8 +11,10 @@ from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.config import get_settings
 from backend.app.db.models import Analysis
 from backend.app.db.session import SessionLocal
+from backend.app.dependencies.models import release_model_cache
 from backend.app.services.classification_service import classify_area
 
 logger = logging.getLogger(__name__)
@@ -71,31 +73,24 @@ def _update_progress(
         db.rollback()
 
 
-def run_analysis_job(
+def _release_models() -> None:
+    """Libera os modelos ao fim do job, se configurado."""
+    if not get_settings().RELEASE_MODELS_AFTER_JOB:
+        return
+    try:
+        release_model_cache()
+        logger.info("Modelos liberados da memória após a análise")
+    except Exception:  # pragma: no cover - falha de limpeza não é fatal
+        logger.exception("Falha ao liberar os modelos da memória")
+
+
+def _classify_and_persist(
     job_id: str,
     db: Session,
-    *,
-    classify: Classifier = classify_area,
+    analysis: Analysis,
+    classify: Classifier,
 ) -> None:
-    """Executa o job já enfileirado e persiste o estado final.
-
-    Recebe a sessão para ser testável sem depender da thread da fila.
-    """
-    analysis = db.get(Analysis, job_id)
-    if analysis is None:
-        logger.warning("Job %s não encontrado no banco", job_id)
-        return
-    if analysis.status != "queued":
-        logger.info(
-            "Job %s ignorado (status atual: %s)", job_id, analysis.status
-        )
-        return
-
-    analysis.status = "running"
-    analysis.stage = "starting"
-    analysis.progress = 0
-    db.commit()
-
+    """Executa o pipeline e grava o estado final (sucesso ou falha)."""
     geojson = analysis.geojson or {}
     rings = geojson.get("coordinates") or [[]]
     polygon_coords = rings[0] if rings else []
@@ -134,6 +129,38 @@ def run_analysis_job(
     except Exception:
         logger.exception("Job %s falhou ao salvar o resultado", job_id)
         _mark_failed(db, job_id, "Falha ao salvar o resultado da análise")
+
+
+def run_analysis_job(
+    job_id: str,
+    db: Session,
+    *,
+    classify: Classifier = classify_area,
+) -> None:
+    """Executa o job já enfileirado e persiste o estado final.
+
+    Recebe a sessão para ser testável sem depender da thread da fila.
+    """
+    analysis = db.get(Analysis, job_id)
+    if analysis is None:
+        logger.warning("Job %s não encontrado no banco", job_id)
+        return
+    if analysis.status != "queued":
+        logger.info(
+            "Job %s ignorado (status atual: %s)", job_id, analysis.status
+        )
+        return
+
+    analysis.status = "running"
+    analysis.stage = "starting"
+    analysis.progress = 0
+    db.commit()
+
+    try:
+        _classify_and_persist(job_id, db, analysis, classify)
+    finally:
+        # Sempre libera, inclusive quando o pipeline retorna falha ou levanta.
+        _release_models()
 
 
 def mark_interrupted_jobs(db: Session | None = None) -> int:

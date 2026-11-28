@@ -2,6 +2,7 @@
 
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -390,6 +391,63 @@ def test_job_exception_marks_failed(client, db, queue):
     assert analysis is not None
     assert analysis.status == "failed"
     assert "GEE fora do ar" in (analysis.error or "")
+
+
+def _release_spy(monkeypatch, enabled=True):
+    from backend.app.services import job_queue
+
+    released: list[bool] = []
+    monkeypatch.setattr(
+        job_queue, "release_model_cache", lambda: released.append(True)
+    )
+    monkeypatch.setattr(
+        job_queue,
+        "get_settings",
+        lambda: SimpleNamespace(RELEASE_MODELS_AFTER_JOB=enabled),
+    )
+    return released
+
+
+def test_job_releases_models_after_success(client, db, queue, monkeypatch):
+    released = _release_spy(monkeypatch)
+    _register(client)
+    job_id = _submit(client).json()["job_id"]
+
+    run_analysis_job(
+        job_id, db, classify=lambda **kwargs: _fake_result(kwargs["job_id"])
+    )
+
+    assert released == [True]
+
+
+def test_job_releases_models_after_failure(client, db, queue, monkeypatch):
+    released = _release_spy(monkeypatch)
+    _register(client)
+    job_id = _submit(client).json()["job_id"]
+
+    def explode(**kwargs):
+        raise RuntimeError("sem memória")
+
+    run_analysis_job(job_id, db, classify=explode)
+
+    assert released == [True]
+
+
+def test_job_keeps_models_when_release_is_disabled(
+    client, db, queue, monkeypatch
+):
+    released = _release_spy(monkeypatch, enabled=False)
+    _register(client)
+    job_id = _submit(client).json()["job_id"]
+
+    run_analysis_job(
+        job_id, db, classify=lambda **kwargs: _fake_result(kwargs["job_id"])
+    )
+
+    assert released == []
+    analysis = db.get(Analysis, job_id)
+    assert analysis is not None
+    assert analysis.status == "completed"
 
 
 def test_classification_rejects_foreign_area(client, db, queue):
