@@ -125,6 +125,7 @@ Documentação da API, autenticação e banco:
 - [`docs/AUTH.md`](docs/AUTH.md) — sessão, cookie e configuração do JWT
 - [`docs/DATABASE.md`](docs/DATABASE.md) — schema e migrações
 - [`docs/JOBS.md`](docs/JOBS.md) — fila em processo, etapas e recuperação
+- [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) — memória, inferência e downloads
 - [`docs/MAINTENANCE.md`](docs/MAINTENANCE.md) — limpeza de outputs e backup
 
 ## Uso
