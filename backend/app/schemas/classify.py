@@ -3,7 +3,12 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class PolygonGeometry(BaseModel):
@@ -41,6 +46,33 @@ class ClassifyRequest(BaseModel):
     postprocess: bool = True
     area_id: int | None = None
     name: str | None = Field(default=None, max_length=160)
+
+    @field_validator("name")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def _validate_dates(self) -> "ClassifyRequest":
+        if self.start_date > self.end_date:
+            raise ValueError(
+                "A data inicial não pode ser posterior à data final."
+            )
+        if self.end_date > date.today():
+            raise ValueError("A data final não pode estar no futuro.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_classifier_satellite(self) -> "ClassifyRequest":
+        sentinel_only = {"unet_cnn", "brazil_unet", "sp_ensemble"}
+        if self.satellite != "sentinel2" and self.classifier in sentinel_only:
+            raise ValueError(
+                "Este classificador está disponível apenas para Sentinel-2."
+            )
+        return self
 
 
 class ClassStats(BaseModel):
