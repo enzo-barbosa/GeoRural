@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # que ficaram "queued"/"running" após um restart são marcadas como falhas.
     RECOVER_STALE_JOBS: bool = True
 
+    # Libera os modelos carregados ao final de cada classificação. Evita manter
+    # vários GB de RAM ociosos; a próxima análise recarrega do disco.
+    RELEASE_MODELS_AFTER_JOB: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

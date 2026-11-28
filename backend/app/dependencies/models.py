@@ -1,5 +1,8 @@
 """FastAPI dependencies for GEE and model management."""
 
+import gc
+import logging
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -7,6 +10,8 @@ from fastapi import HTTPException
 
 from backend.app.config import get_settings
 from src.gee.auth import initialize_gee
+
+logger = logging.getLogger(__name__)
 
 # Global flag for GEE initialization
 _gee_initialized = False
@@ -115,6 +120,34 @@ def get_cached_model(model_name: str):
         return load_crop(str(path))
 
     raise HTTPException(status_code=400, detail=f"Unknown model: {model_name}")
+
+
+def _trim_process_memory() -> None:
+    """Tenta devolver ao sistema a memória livre do heap do processo.
+
+    No Linux (caso do container Docker) usamos ``malloc_trim``. Em outros
+    sistemas a limpeza fica por conta do ``gc.collect``.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except (OSError, AttributeError):  # pragma: no cover - depende do SO
+        logger.debug("Não foi possível ajustar a memória do processo", exc_info=True)
+
+
+def release_model_cache() -> None:
+    """Descarta os modelos carregados e devolve a memória ao sistema.
+
+    O Random Forest do Brasil tem ~1,8 GB em disco e expande para vários GB na
+    memória. Sem isso, o processo fica com esse heap ocioso entre análises.
+    """
+    get_cached_model.cache_clear()
+    gc.collect()
+    _trim_process_memory()
 
 
 def get_models_status() -> dict[str, bool]:
